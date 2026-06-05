@@ -1,0 +1,60 @@
+# One-click stack: the dario proxy + its web dashboard.
+#
+#   cp .env.example .env   # then edit secrets
+#   docker compose up -d --build
+#
+# Open the dashboard, log in, and add an account from the Accounts tab (its
+# OAuth add talks to Anthropic directly and writes the shared volume). The
+# proxy picks the account up on its next restart and goes healthy.
+
+name: dario
+
+services:
+  dario:
+    build:
+      context: ./dario
+    image: dario:local
+    restart: unless-stopped
+    environment:
+      DARIO_HOST: 0.0.0.0
+      DARIO_PORT: "3456"
+      # Required: inside the container the proxy binds 0.0.0.0 so the dashboard
+      # container can reach it, which trips dario's "non-loopback needs a key"
+      # guard. Set a strong value in .env.
+      DARIO_API_KEY: ${DARIO_API_KEY:?set DARIO_API_KEY in .env}
+    volumes:
+      - dario-data:/home/dario/.dario
+    # No host port by default — the proxy is reachable only by the dashboard
+    # over the internal network. To route external tools (Cursor/Cline/...)
+    # through it, uncomment and send `x-api-key: $DARIO_API_KEY`:
+    # ports:
+    #   - "3456:3456"
+
+  dashboard:
+    build:
+      context: ./dario-dashboard
+    image: dario-dashboard:local
+    restart: unless-stopped
+    # Soft ordering only — NOT service_healthy. On a fresh volume dario exits
+    # with "Not authenticated" and restart-loops until an account exists; the
+    # dashboard must be up first so you can add that account from the browser.
+    depends_on:
+      - dario
+    environment:
+      DARIO_BASE_URL: http://dario:3456
+      DARIO_API_KEY: ${DARIO_API_KEY:?set DARIO_API_KEY in .env}
+      DARIO_CONFIG_PATH: /home/dario/.dario/config.json
+      DARIO_ACCOUNTS_DIR: /home/dario/.dario/accounts
+      # The dashboard exposes the full subscription observability + config
+      # editor, so it runs behind a password on any non-loopback port.
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set DASHBOARD_PASSWORD in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+    volumes:
+      - dario-data:/home/dario/.dario
+    ports:
+      # Host port (default 3088) → container 3000. Bound to all interfaces so
+      # it's reachable over the network; the password gate is what protects it.
+      - "${DASHBOARD_PORT:-3088}:3000"
+
+volumes:
+  dario-data:

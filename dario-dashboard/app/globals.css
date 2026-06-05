@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/*
+ * Dark, terminal-adjacent dashboard theme — the Web counterpart to dario's
+ * ANSI TUI. Tailwind v4 reads design tokens from @theme.
+ */
+@theme {
+  --color-bg: #09090b;
+  --color-panel: #0e0e11;
+  --color-panel-2: #141417;
+  --color-border: #26262b;
+  --color-ink: #e4e4e7;
+  --color-ink-dim: #a1a1aa;
+  --color-ink-faint: #71717a;
+
+  --color-accent: #7c83ff;
+  --color-accent-soft: #4b4fa8;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #fb7185;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars for the data tables. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+@keyframes border-beam {
+  to {
+    offset-distance: 100%;
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-row-in {
+  animation: row-in 0.35s ease-out;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}

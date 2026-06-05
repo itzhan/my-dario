@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-package-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+      - name: package.json is valid JSON and canonically formatted
+        run: node scripts/check-package-json.mjs
+
+  build:
+    needs: validate-package-json
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm run audit
+      - run: npm run build
+      - run: node dist/cli.js help
+      - run: node dist/cli.js status
+
+  # Unit suite. `npm test` (test/all.test.mjs) fans out every test/*.mjs as
+  # a node:test subtest EXCEPT the live-integration files (e2e / compat /
+  # stress / stealth — they need a running proxy, a real key, or a
+  # subscription). Build first: the tests import compiled code from dist/.
+  # Guards against silent unit-test rot — the build job above only runs
+  # `cli help`/`status`, so a stale assertion (an alias bump, a prompt
+  # rename) used to sit red on master unnoticed. The one binary-dependent
+  # test (oauth-detector) skips itself when no `claude` is on PATH, which
+  # is the case on a GitHub-hosted runner.
+  test:
+    needs: validate-package-json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # Docker smoke test under cap_drop: ALL — catches the class of regression
+  # that shipped twice on 2026-05-14 (v3.37.16 + v3.37.17) where a Dockerfile
+  # change introduced a privilege flow (chown / su-exec) that requires
+  # capabilities stripped by the hardened-container default. The askalf
+  # platform compose runs dario this way; the published image must remain
+  # compatible.
+  docker-cap-drop-smoke:
+    needs: validate-package-json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build image (single-arch, no push)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          tags: dario-ci-cap-test:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: '--help under cap_drop: ALL + no-new-privileges (must succeed)'
+        run: |
+          # Catches both the v3.37.16 (chown EPERM) and v3.37.17 (su-exec
+          # setgroups EPERM) failure modes in a single test.
+          docker run --rm \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges:true \
+            dario-ci-cap-test:latest --help > /tmp/help-out.txt 2>&1
+          test -s /tmp/help-out.txt  # non-empty output
+          grep -q 'login\|proxy\|doctor' /tmp/help-out.txt  # has command list
+
+      - name: 'doctor under cap_drop: ALL (entrypoint exec test)'
+        run: |
+          # doctor exit code is content-driven (1 if any [FAIL] row, 0
+          # otherwise). A fresh container has no credentials, so OAuth fails,
+          # so exit code is 1 — that's not a regression we care about here.
+          # The regression class this test guards against is "entrypoint
+          # crashed before exec'ing the CLI" — detected by checking the
+          # CLI actually produced the doctor report (version + Node rows).
+          docker run --rm \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges:true \
+            dario-ci-cap-test:latest doctor > /tmp/doctor-out.txt 2>&1 || true
+          echo '--- doctor output ---'
+          cat /tmp/doctor-out.txt
+          echo '--- assertions ---'
+          test -s /tmp/doctor-out.txt
+          grep -q 'dario.*v[0-9]' /tmp/doctor-out.txt  # version row populated
+          grep -q 'Node.*v' /tmp/doctor-out.txt        # Node row present
+          echo 'PASS'
+
+      - name: 'no entrypoint restart-loop under cap_drop: ALL'
+        run: |
+          # The regression class we're guarding: entrypoint script crashes
+          # under cap_drop because chown / su-exec / setgroups need caps the
+          # config strips, container enters Docker's restart-backoff loop.
+          # That manifests as State.Status=restarting and RestartCount>1.
+          #
+          # We do NOT assert proxy actually serves requests — without OAuth
+          # credentials it exits cleanly with exit code 1 ("Not authenticated.
+          # Run `dario login` first."), which is correct behavior and not the
+          # regression class. An exited container is fine; a restarting one
+          # is the bug.
+          docker volume create dario-ci-test-vol
+          # No --restart policy — we want a single attempt. If the entrypoint
+          # crashes the way v3.37.16/17 did, the user's compose has
+          # restart: unless-stopped which loops it; we don't need to
+          # reproduce that in CI, we just need to see that the entrypoint's
+          # FIRST exec succeeded.
+          docker run -d --name dario-cap-smoke \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges:true \
+            -p 13456:3456 \
+            -v dario-ci-test-vol:/home/dario/.dario \
+            -e DARIO_NO_BUN=1 \
+            -e DARIO_API_KEY=ci-cap-smoke-secret \
+            dario-ci-cap-test:latest proxy
+
+          # Give the container time to either start serving or finish exiting.
+          sleep 10
+
+          STATUS=$(docker inspect dario-cap-smoke --format '{{.State.Status}}')
+          RESTART_COUNT=$(docker inspect dario-cap-smoke --format '{{.RestartCount}}')
+
+          echo "container status: $STATUS"
+          echo "restart count:    $RESTART_COUNT"
+          echo '--- last 30 log lines ---'
+          docker logs dario-cap-smoke 2>&1 | tail -30
+
+          # Assertions:
+          #   - "restarting" → entrypoint crashed, Docker is retrying (REGRESSION)
+          #   - exited / running → entrypoint exec'd the CLI successfully
+          #     (the CLI may then have cleanly exited on missing OAuth, which is
+          #     not the regression class we're guarding)
+          test "$STATUS" != "restarting"
+
+          # Scan logs for the exact error strings v3.37.16 and v3.37.17 emitted.
+          # If either appears, the regression is back. Use if/then so set -e
+          # doesn't get confused by the leading-! pattern (SC2251).
+          if docker logs dario-cap-smoke 2>&1 | grep -q "chown: .* Permission denied"; then
+            echo "REGRESSION: v3.37.16-class chown EPERM detected" >&2
+            exit 1
+          fi
+          if docker logs dario-cap-smoke 2>&1 | grep -q "su-exec: setgroups: Operation not permitted"; then
+            echo "REGRESSION: v3.37.17-class su-exec setgroups EPERM detected" >&2
+            exit 1
+          fi
+
+          docker rm -f dario-cap-smoke
+          docker volume rm dario-ci-test-vol

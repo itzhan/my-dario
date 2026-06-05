@@ -1,0 +1,4027 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+<!--
+Release convention: land changes under `## [Unreleased]`. At release
+time, rename that heading to `## [X.Y.Z] - YYYY-MM-DD` and add a fresh
+`## [Unreleased]` above it. See CONTRIBUTING for the full release
+checklist.
+-->
+
+## [Unreleased]
+
+## [4.8.32] - 2026-06-04
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.162` → `2.1.163` for CC v2.1.163. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.31] - 2026-06-04
+
+- **Restore `--system-prompt` strip on the compact CC prompt + refresh a stale alias test** — `system-prompt-modes` exposed that `resolveSystemPrompt('partial'/'aggressive')` had silently degraded to verbatim: its strip targeted the old verbose prompt (`# Tone and style`, `# Doing tasks` bullets, `# Executing actions with care`), none of which exist in CC 2.1.x's compact prompt. `stripBehavioralConstraints` now also targets the compact prompt — `partial` swaps the comment-density / match-surrounding-style line for the positive "be thorough" instruction; `aggressive` additionally removes the `IMPORTANT:` RLHF line and the hard-to-reverse caution paragraph. Legacy patterns stay as no-op fallbacks. Separately, `provider-prefix` expected `opus → claude-opus-4-7`, stale since the opus 4.8 release (the alias resolves to `claude-opus-4-8`); fixed and `opus47` legacy-pin coverage added. `npm test` is green again (77/77).
+## [4.8.30] - 2026-06-04
+
+- **Scrub the POSIX `~/.claude/projects` path slug** — the template scrubber normalized Windows / `C--Users-` home paths but not the POSIX flattened project slug, so the self-hosted-runner bake left `/root/.claude/projects/-root-actions-runner--work-dario-dario/memory/` in the bundled `# Memory` section: a host-path leak on every fresh install's first request, and a source of benign per-working-directory `--check` drift. `scrubText` now collapses the slug to `.claude/projects/project/` under any home (incl. `/root`), `findUserPathHits` gains a matching detector, and the shipped bundle is re-scrubbed. Forward-slash anchored, so the Windows backslash form is untouched.
+## [4.8.29] - 2026-06-04
+
+- **Glob/Grep are platform-scoped** — `Glob` and `Grep` join `PowerShell` in `PLATFORM_ONLY_TOOLS` (win32). CC v2.1.162 advertises them on Windows CC but drops them on POSIX (steering the agent to shell `find`/`grep`), so the v4.8.28 re-bake on the Linux runner silently culled them from the bundled union — degrading the Windows fallback to a 28-tool POSIX shape. They are now preserved across bakes and filtered to win32 clients, restoring the 30-tool Windows wire shape. A POSIX `capture-and-bake --check` once again reports no drift.
+## [4.8.28] - 2026-06-04
+
+- **Template rebake** — re-captured `src/cc-template-data.json` after cc-drift-template-watch detected wire-fingerprint drift against a live CC capture. Bundled fallback template now matches the current CC wire shape.
+## [4.8.27] - 2026-06-03
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.161` → `2.1.162` for CC v2.1.162. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.26] - 2026-06-02
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.160` → `2.1.161` for CC v2.1.161. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.25] - 2026-06-02
+
+- **Template version-label bump** — `_version` + the `user-agent` header value → `2.1.160` to track `@anthropic-ai/claude-code@latest`. The wire shape is unchanged (`cc-drift-template-watch` reports zero shape drift vs live CC), so this is a label refresh, not a re-capture — `_captured` is intentionally left at the last real capture. Clears the `sdk-drift` signal ([#426](https://github.com/askalf/dario/issues/426)).
+
+## [4.8.24] - 2026-06-02
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.159` → `2.1.160` for CC v2.1.160. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.23] - 2026-06-01
+
+- **Effort via model-name suffix** ([#419](https://github.com/askalf/dario/issues/419)) — OpenAI-compatible clients that can't set `output_config.effort` (e.g. Cursor) can now pick reasoning effort by model name: `anthropic:opus-4-8:high` / `claude:opus-4-8:high` (colon) or Cursor-style `claude-opus-4-8-high` (hyphen). Levels `low|medium|high|xhigh|max` (plus `ultracode`). Parsed per-request and takes precedence over the global `--effort` flag; Claude-routed models only — OpenAI-bound models keep their own `-high`/`-low` suffixes for the OpenAI backend.
+
+## [4.8.22] - 2026-05-31
+
+- **Template version-label bump** — `_version` + the `user-agent` header value → `2.1.159` to track `@anthropic-ai/claude-code@latest`. The wire shape is unchanged (`cc-drift-template-watch` reports zero shape drift vs live CC), so this is a label refresh, not a re-capture — `_captured` is intentionally left at the last real capture. Clears the `sdk-drift` signal ([#411](https://github.com/askalf/dario/issues/411)).
+
+## [4.8.21] - 2026-05-31
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.158` → `2.1.159` for CC v2.1.159. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.20] - 2026-05-31
+
+- **Default effort → `max` (was `xhigh`)** — the unset `output_config.effort` default is now `max`, the highest *universally-supported* level. `xhigh` is Opus-only, so a fresh `npx @askalf/dario` on Sonnet/Haiku-class models 400'd ("does not support effort level 'xhigh'"). `max` is accepted by every model and still routes to the subscription pool (verified `representative-claim=five_hour` on Opus + Sonnet). Power users wanting Opus's extra tier set `--effort=xhigh` / `DARIO_EFFORT=xhigh`. (`resolveEffort` default + client-mode fallback.)
+
+## [4.8.19] - 2026-05-30
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.157` → `2.1.158` for CC v2.1.158. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.18] - 2026-05-29
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.156` → `2.1.157` for CC v2.1.157. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.17] - 2026-05-29
+
+- **Template rebake** — re-captured `src/cc-template-data.json` after cc-drift-template-watch detected wire-fingerprint drift against a live CC capture. Bundled fallback template now matches the current CC wire shape.
+## [4.8.16] - 2026-05-29
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.154` → `2.1.156` for CC v2.1.156. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.13] - 2026-05-28
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.153` → `2.1.154` for CC v2.1.154. Auto-drafted by `cc-drift-watch.yml`. Template re-capture, if needed, is auto-handled by `cc-drift-template-watch.yml`.
+## [4.8.11] - 2026-05-28
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.152` → `2.1.153` for CC v2.1.153. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.10] - 2026-05-27
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.150` → `2.1.152` for CC v2.1.152. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.9] - 2026-05-23
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.149` → `2.1.150` for CC v2.1.150. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.8] - 2026-05-22
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.148` → `2.1.149` for CC v2.1.149. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.7] - 2026-05-22
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.147` → `2.1.148` for CC v2.1.148. Supersedes the blocked bot PR #359 (CI doesn't run on bot-opened branches due to GITHUB_TOKEN-attributed event suppression — same blocker that affected #352 / #356). Closes cc-drift issue #358.
+
+## [4.8.6] - 2026-05-21
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.145` → `2.1.147` for CC v2.1.146 + v2.1.147 (rolled together; v2.1.147 is a strict superset of v2.1.146). Rolls up cc-drift issues #351 + #355 and supersedes the conflicted bot PRs #352 + #356. Bundled template was last re-captured at v2.1.143 (2026-05-17, 4d old); doctor's background live-fingerprint refresh handles the live-side drift, no template bake needed.
+
+## [4.8.5] - 2026-05-21
+
+### Added — `dario doctor` Identity drift check (#353)
+
+New "Identity" row in `dario doctor` that compares each pool account's stored `{deviceId, accountUuid}` snapshot against the live `~/.claude.json` and warns on drift:
+
+```
+  [ OK  ]  Identity  2/2 pool accounts match ~/.claude.json (userID=d4f7c0a1…)
+  [WARN ]  Identity  1/2 pool accounts drifted from ~/.claude.json — re-run `dario accounts add <alias>` to refresh the stored snapshot
+```
+
+Drift surfaces silently as `authentication_error` 401 from Anthropic on **non-Haiku** models when an OAuth bearer no longer matches the `metadata.user_id` the proxy builds from the live `.claude.json`. Haiku is more permissive and tolerates the mismatch, which makes the failure mode look intermittent and account-tier-shaped even though it's an identity-staleness bug. The new check turns that into a one-second diagnostic.
+
+The comparison is factored into a pure exported function `checkIdentityDrift({live, poolAccounts})` so all branches are unit-testable without filesystem fixtures.
+
+Out of scope (follow-up): single-account mode can't detect bearer-vs-`.claude.json` drift locally because dario stores no baseline alongside `~/.dario/credentials.json` — the proxy reads identity live per-request. Two future paths discussed in the PR: opt-in `dario doctor --identity` network probe, or snapshot identity at login time.
+
+## [4.8.4] - 2026-05-19
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.144` → `2.1.145` for CC v2.1.145. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.3] - 2026-05-19
+
+### Added — `--honor-client-thinking` for non-CC SDK clients
+
+New flag (env: `DARIO_HONOR_CLIENT_THINKING=1`) makes dario pass the client body's `thinking` field through to upstream instead of overwriting it with the default CC-style `{type:"adaptive"}`. SDK clients (apps calling dario via the Anthropic SDK) can now explicitly enable extended thinking with their own budget:
+
+```js
+fetch('http://dario:3456/v1/messages', {
+  method: 'POST',
+  body: JSON.stringify({
+    model: 'claude-opus-4-7',
+    thinking: { type: 'enabled', budget_tokens: 8000 },
+    messages: [...],
+  }),
+});
+```
+
+Without the flag, CC's `{type:"adaptive"}` shape is forced (correct for CC clients, but doesn't expose the budget knob to non-CC clients and forces newer 4.6-era models even when older Opus/Sonnet 4-5 endpoints would accept the public-API `{type:"enabled"}` shape).
+
+When honored, dario suppresses its paired `context_management.clear_thinking_20251015` edit — that edit is tuned for `type:"adaptive"` and pairing it with `type:"enabled"` 400s upstream (`"clear_thinking_* strategy requires thinking to be enabled or adaptive"`). The client takes responsibility for the request shape as a whole. Output `effort` injection is unchanged.
+
+No effect on Haiku (skips thinking by construction) or when the client omits `thinking`. CC clients are unaffected. Headers, beta flags, metadata, OAuth identity, billing pool routing all intact.
+
+## [4.8.2] - 2026-05-19
+
+- **Fix — streaming token capture on single-account installs (#335).** The streaming SSE token parser in `proxy.ts` was gated on `poolAccount` being non-null. In single-account mode `poolAccount` is always null, so the parser never ran. Every streaming request landed in `/analytics` with `inputTokens=0 outputTokens=0 estimatedCost=0` — broke per-model and per-window token totals on every single-account install whose clients stream (Claude Code, Anthropic SDK, OpenAI-shim path). Drop the pool gate so token accumulators are filled in single-account mode too. Also capture thinking tokens from streaming `content_block_delta` events with `delta.type === 'thinking_delta'` (was hardcoded to 0).
+
+## [4.8.1] - 2026-05-19
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.143` → `2.1.144` for CC v2.1.144. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [4.8.0] - 2026-05-18
+
+### Added — `--skip-fields=<csv>` for opting out of CC body injections (#325)
+
+New flag (env: `DARIO_SKIP_FIELDS`) suppresses specific CC body-field injections on outbound requests. Allowed values: `thinking`, `context_management`, `output_config`.
+
+When an upstream model 400s on one of these fields with `"Extra inputs are not permitted"`, the operator can list the offending field name(s) and dario will skip the injection while keeping every other piece of CC fingerprinting intact — headers, beta flags, metadata, OAuth bearer, user-agent. Max billing pool routing depends on the headers (`x-app: cli` + the captured beta set + OAuth identity), not the body field set, so suppressing one body field does not move traffic to the Agent SDK pool.
+
+Surfaced 2026-05-18 with a non-CC client (askalf forge using the Anthropic SDK directly) routed through dario to `claude-sonnet-4-6`: `context_management` rejected at schema validation despite the `context-management-2025-06-27` beta header being present in the outbound request. Same client got past `output_config` rejection by setting `DARIO_EFFORT=max` (the model accepts `max` but not the CC-default `xhigh`). The `--skip-fields` flag handles the broader pattern uniformly so future model-side validation tightening doesn't require new env vars per field.
+
+Unrecognized values are dropped with a warn at startup — typo doesn't quietly disable nothing. Haiku continues to skip all three fields by construction (existing behavior; the new flag is for non-Haiku models).
+
+## [4.7.2] - 2026-05-18
+
+### Added — workflow_dispatch override inputs for canary + liveness validation
+
+Three joints in the drift-detection loop have working code but had not been observed firing in production: the PAT-equipped auto-rebake → compat-test gate, the canary alert-open path, and the liveness alert-open path. The PAT joint validates naturally on the next real Class B drift event. The other two would otherwise require either synthesizing a real failure (pollutes the issue tracker) or waiting for an 8h watcher outage (operationally costly). v4.7.2 adds dispatch-time override inputs so we can exercise both alert paths on demand without production state pollution.
+
+**`cc-billing-classifier-canary.yml`** — new `workflow_dispatch.inputs.force_status` (choice: `''` | `pass` | `fail` | `warn`). When set, the verdict is overridden to the chosen value with a synthetic `claim` value (`forced-fail` etc.) so it's clear in the issue body this was a validation run. Real probe still runs but its result is replaced. The override is only readable on `workflow_dispatch`; scheduled runs see an empty string and ignore it.
+
+**`cc-drift-watcher-liveness.yml`** — new `workflow_dispatch.inputs.force_threshold_hours` (string). When set, overrides the hardcoded 8h threshold. Dispatching with `force_threshold_hours=1` against a watcher that last ran 2h ago will trip the threshold and exercise the alert-open path. Scheduled runs see empty string → 8h.
+
+### Validation procedure
+
+```bash
+# Exercise canary alert-open path:
+gh workflow run cc-billing-classifier-canary.yml --ref master -f force_status=fail
+# → opens labeled `cc-billing-canary` alert. Next scheduled run with real
+#   subscription verdict auto-closes it.
+
+# Exercise liveness alert-open path:
+gh workflow run cc-drift-watcher-liveness.yml --ref master -f force_threshold_hours=1
+# → opens labeled `cc-watcher-liveness` alert. Next scheduled run with
+#   default 8h threshold auto-closes (watcher's been within 2-4h all session).
+```
+
+Both forced runs leave behind a brief auto-closed alert in the closed-issues list — these are the receipts that the alert paths work end-to-end. The validation runs themselves are marked with `::warning::force_status=…` in the workflow log so they're distinguishable from real fires later.
+
+### Why a patch
+
+Pure additive validation capability. No behavior change on scheduled runs (the inputs are only populated on `workflow_dispatch`). No `src/` changes. No new tests (the override paths are exercised by their own existence — dispatching them is the test).
+
+### Internal
+
+- Two workflow files modified (`cc-billing-classifier-canary.yml`, `cc-drift-watcher-liveness.yml`)
+- ~10 added lines per workflow (input declaration + conditional read)
+- No `src/` edits
+- 75/75 default suite green
+
+## [4.7.1] - 2026-05-18
+
+### Fixed — liveness alarm now actually alerts
+
+Overnight observation surfaced two latent bugs in the v4.4.2 liveness alarm. The workflow had been "firing" successfully (running every 2h on schedule) and **correctly detecting that the class-B watcher was lagging behind threshold** — but failing before it could open a `cc-watcher-liveness` issue. So the alarm was silently broken: the watcher could have actually been offline and no alert would have surfaced.
+
+**Bug 1 — Missing `actions/checkout`.** The workflow shelled out to `gh issue list` / `gh issue create` without first checking out the repo. `gh` resolves the target repository by reading `.git/config` from the working directory; without a git context, it fails with `fatal: not a git repository`. The workflow exited 1 immediately after correctly logging `Last successful watcher run: ... (4 hours ago, threshold 3h)`.
+
+**Bug 2 — Threshold set against fictional cadence.** I sized the 3h threshold against the *declared* `*/30 * * * *` cron (= 6 missed cycles), but GitHub Actions' free-tier cron scheduler is best-effort, not guaranteed. The observed cadence of the class-B watcher on this repo is every 2-4 hours, not 30 min. So even *healthy* watcher state would trip the 3h threshold ~half the time.
+
+### Fix
+
+- Add `actions/checkout@v6.0.2` to the start of the job. Provides the `.git` directory `gh` needs.
+- Bump `THRESHOLD_HOURS` from `3` to `8`. Absorbs the observed 2-4h scheduler skew while still catching real outages (anything past 8h of silence is signal, not noise).
+- Update alert-body text to describe both the declared and observed cadence so an investigator reading the alert understands the threshold rationale.
+
+### Documented — scheduler reality
+
+`docs/drift-monitor.md`'s "Runner credential rate-limit headroom" section gains an explicit *Observed cadence* column distinguishing declared cron from real-world cron. Plus a paragraph stating: GitHub Actions free-tier cron is best-effort; if you need sub-hour SLA, self-host both the runner and the cron driver.
+
+### Why a patch
+
+Operational hardening — same shape as v4.4.1 / v4.6.1 / v4.6.2 / v4.6.3 / v4.6.5. Workflow + docs only, no `src/` change. The previous behavior wasn't producing false alarms (the workflow exited 1 before opening any issue), but it also wasn't producing real ones; the alarm was effectively a no-op for the entire window from v4.4.2 (2026-05-17) through v4.7.0.
+
+### Internal
+
+- One workflow file (`cc-drift-watcher-liveness.yml`): adds checkout step + threshold bump + body-text refinement
+- `docs/drift-monitor.md`: explicit declared-vs-observed cadence column + scheduler-reality paragraph
+- No `src/` edits, no test changes
+- 75/75 default suite green
+
+## [4.7.0] - 2026-05-18
+
+### Added — auto-rebake PRs and drift issues lead with a structured verdict
+
+PR #317 (tonight's first real-world auto-rebake) demonstrated the v4.4.0 → v4.5.0 → v4.6.5 chain works end-to-end. It also surfaced an ergonomic gap: the PR body opened with raw `[bake]` log output, then a unified-line diff. A reviewer had to read ~60 lines of detail to decide ship-or-investigate. The common case (text-only system_prompt drift, ship it) was indistinguishable at a glance from the rare case (tools removed, body_field_order changed, investigate).
+
+v4.7.0 leads with a one-line verdict + per-axis bullet breakdown.
+
+### Mechanism
+
+`scripts/drift-report.mjs` gains two new exports:
+
+- **`interpretDrift(diff)`** — classifies the slot-level diff into a structured summary: `toolsAdded`, `toolsRemoved`, `betasAdded`, `betasRemoved`, `systemPromptDelta`, `agentIdentityChanged`, `bodyFieldOrderChanged`, `headerOrderChanged`, plus a single `verdict`:
+  - `'benign'` — text-only drift (system_prompt / agent_identity content), no structural shifts. The 90%+ case.
+  - `'moderate'` — tools added, betas changed, agent_identity changed. Probably ship, worth a closer read.
+  - `'substantive'` — **tools removed**, body_field_order or header_order changed. Don't auto-trust; these can break canonical-rebuild paths.
+  - Verdict ladder is conservative — substantive dominates moderate dominates benign — so when tool-removed and tool-added land in the same drift, the verdict is `substantive`.
+- **`formatDriftSummary(interpretation)`** — renders the structured summary as markdown for direct embedding in PR + issue bodies. Leads with `**Verdict:** ✅ Benign` / `🟡 Moderate` / `🔴 Substantive`, then per-axis bullets with brief context (e.g., "⚠ can break canonical-rebuild paths" next to tools-removed).
+
+### Wiring
+
+- `scripts/capture-and-bake.mjs --check`: prints the verdict-led summary before the unified-line detail. Also writes `drift-summary.md` to disk so the workflow can drop it into PR/issue bodies without grep-parsing the `[bake]`-prefixed log output.
+- `.github/workflows/cc-drift-template-watch.yml`: both the auto-rebake PR body and the drift tracking issue body lead with a "### Summary" section (the contents of `drift-summary.md`) before the existing "### Drift report" code block. Guarded by `[ -f drift-summary.md ]` so the workflow stays compatible with pre-v4.7.0 bakes.
+
+### Reviewer-ergonomics example
+
+What a reviewer sees on the next class-B drift PR, before reading any detail:
+
+> **Verdict:** ✅ Benign
+> - **system_prompt:** -2107 chars net (text-content drift — see unified diff below)
+
+That's enough for the common case. Click merge. The unified diff stays inline below for the unusual cases where the slot-level signal isn't enough.
+
+### Tests
+
+`test/bake-drift-report.mjs` gains 12 new headers (20-31) / 27 assertions covering empty-diff verdict, per-slot verdict promotions, multi-axis aggregation, comma-split parsing of tool/beta lists, `formatDriftSummary` emoji + label + bullet rendering across the three verdicts. **69/69 file tests pass; 75/75 full suite green.**
+
+### Why a minor bump
+
+New observable surface in workflow-embedded artifacts (auto-rebake PR bodies, drift issue bodies, `--check` log output) plus two new public exports from `scripts/drift-report.mjs`. Anyone monitoring repo activity sees a structurally different shape. The exit codes (`--check` 0/1/2) and existing detail format are unchanged — purely additive.
+
+### Internal
+
+- One new function + one new helper in `scripts/drift-report.mjs` (+114 lines)
+- `capture-and-bake.mjs --check`: writes `drift-summary.md` alongside `drift-output.txt`
+- Workflow body composition gains 5 lines of conditional `cat drift-summary.md`
+- `test/bake-drift-report.mjs`: 12 new headers, 27 new assertions
+- No `src/` edits
+
+## [4.6.5] - 2026-05-17
+
+### Fixed — auto-rebake PRs now eligible for compat-test gating (optional PAT)
+
+The first real-world class-B drift event today exposed a gap in the v4.4.0 design. When the watcher fired at 23:47 UTC, opened [PR #317](https://github.com/askalf/dario/pull/317) via `gh pr create`, and we went to merge it — branch protection blocked the merge because the **required compat-test check had never fired**. Compat-test (which lives in `pull_request:`) didn't observe the bot's PR at all.
+
+**Cause.** GitHub Actions has a deliberate security restriction: workflows authenticated by the default `GITHUB_TOKEN` cannot trigger downstream workflow runs ([docs](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow)). The auto-rebake PR was therefore invisible to compat-test, and the validation gate the v4.4.0 CHANGELOG promised was effectively bypassed for every auto-rebake PR.
+
+**Fix.** [`cc-drift-template-watch.yml`](.github/workflows/cc-drift-template-watch.yml)'s `Auto-rebake + open PR` step now reads `GH_TOKEN: ${{ secrets.DARIO_DRIFT_BOT_PAT || secrets.GITHUB_TOKEN }}` — preferring a maintainer-supplied PAT if present, falling back to GITHUB_TOKEN if not. PRs created with a PAT are treated as a regular user action by Actions, so `pull_request:` triggers fire normally and compat-test gets to run.
+
+**Setup** (one-time, [`docs/drift-monitor.md`](docs/drift-monitor.md)):
+
+1. Generate a fine-grained PAT at `github.com/settings/personal-access-tokens/new` scoped to this repo with `Contents: write`, `Pull requests: write`, `Issues: write`.
+2. Add it as repo secret `DARIO_DRIFT_BOT_PAT`.
+3. Next drift event proves it: the bot PR will have a `compat` check alongside the others.
+
+The fallback to `GITHUB_TOKEN` exists so the watcher keeps working pre-PAT setup — operators can defer this without breaking the loop. The cost of deferring is "auto-rebake PRs need human-only review" (which is how PR #317 was actually merged tonight, with `--admin` to bypass the blocking required-check policy).
+
+### What PR #317 proved
+
+This was the first real-world execution of the v4.4.0 → v4.5.0 → v4.6.4 chain in production. Cycle: 23:47:27 UTC drift detected → bot opens [PR #317](https://github.com/askalf/dario/pull/317) with unified-line diff inline → human reviews (substantively non-trivial change: AskUserQuestion gained a new "Preview feature" section, "Executing actions with care" condensed from 4 paragraphs to 1 sentence, "clarifying question has a cost" guidance added) → human merges (admin override due to the gap fixed here) → 23:55:36 UTC watcher cycle confirms exit 0 → auto-closes [issue #318](https://github.com/askalf/dario/issues/318). Full receipt: 8 minutes from drift to fix to closure.
+
+### Why a patch
+
+Same shape as v4.4.1 / v4.6.1 / v4.6.2 / v4.6.3 — operational hardening on the workflow surface. No code change, no test change, just the workflow env line + docs. The fallback preserves the pre-v4.6.5 behavior for operators who haven't set up the PAT yet.
+
+### Internal
+
+- One workflow line changed (`cc-drift-template-watch.yml` GH_TOKEN env on the Auto-rebake step)
+- `docs/drift-monitor.md`: new section "Optional: PAT for downstream workflow triggers"
+- No `src/` edits
+- 75/75 default suite green
+
+## [4.6.4] - 2026-05-17
+
+### Updated — README + GitHub repo description reflect three-class drift
+
+The README's drift-detection narrative had been stuck at v4.2.2's "two-class drift detection, two watchers" framing — stale since v4.6.0 added Class C (classifier-rule drift via the daily billing canary). v4.6.4 catches the README up to current reality.
+
+**Updated.** Four sections of `README.md`:
+
+1. **Lede paragraph** (line 20): "The hourly drift watcher" → "A three-class drift watcher … auto-opens a fix PR with a unified diff inline."
+2. **"Two classes of drift, two watchers"** → **"Three classes of drift, three watchers, all auto-detecting and auto-PR'ing"** — adds Class C (billing canary) and the v4.4.2 liveness alarm, and updates the Class B bullet to mention v4.4.0's auto-rebake-PR behavior + v4.5.0's unified-diff snippets.
+3. **Capabilities bullet "Two-class drift detection"** → **"Three-class drift detection"** with all five workflows (3 watchers + PR-gate + liveness) named.
+4. **FAQ "What if Anthropic ships another silent change tomorrow?"** — updates the answer to the three-class flow with class-specific behavior (Class A auto-merges, Class B auto-rebakes + PRs, Class C opens labeled alert).
+
+**Also updated — GitHub repo description.** Done via `gh repo edit` (no PR needed, immediate visibility). Old: `"... interactive TUI (v4), hourly CC drift detection. One local endpoint."` → New: `"... interactive TUI (v4), three-class CC drift detection (v4.6). One local endpoint."` Visible on the repo home and in GitHub search results.
+
+### Why a patch
+
+Docs-only, no code change. The previous text wasn't wrong — it described an earlier version of the system — it just lagged. Catching up.
+
+### Internal
+
+- `README.md`: four content updates, ~30 lines diff
+- `package.json`: 4.6.3 → 4.6.4 (triggers auto-release)
+- No `src/` edits, no test changes
+- 75/75 default suite green
+
+## [4.6.3] - 2026-05-17
+
+### Fixed — compat-test no longer reports SUCCESS while tests fail
+
+A latent harness bug surfaced as soon as v4.6.2 made compat-test actually reach the PR's own dist. The "Run compat tests" step ran `node test/compat.mjs | tee compat-output.txt`, then captured `$?` into `GITHUB_OUTPUT`. Without `pipefail` set, `$?` is the exit code of `tee`, which is always 0 — so a 9-of-10-failing compat suite still emitted `exit_code=0`, and the workflow's job-status finalizer marked the run SUCCESS.
+
+We caught this in PR #314's compat-test run (#26003543366): the proxy.log proved :3457 was bound and the PR's own dist was being exercised; the test output showed `RESULTS: 1 passed, 9 failed`; the workflow check on the PR showed `compat: SUCCESS`. The bug hid itself for every prior compat run since v4.3.0 because v4.6.0/v4.6.1 had different bugs that caused the workflow to fail earlier — only v4.6.2 made compat-test reach this step cleanly enough to expose it.
+
+**Fix.** Capture `${PIPESTATUS[0]}` (the leftmost piped command's exit) instead of `$?`. Single line change in `.github/workflows/compat-test-self-hosted.yml`.
+
+### Documented — runner credential rate-limit headroom
+
+`docs/drift-monitor.md` gains a section on the runner credential's expected request budget across all the workflows that hit it. Pro/Max accounts have per-hour rate caps as well as the per-5h / per-7d pools, and the per-hour cap is what surfaces first when manually re-triggering workflows in rapid succession (we tripped this during the v4.6.x rollout with a half-dozen manual re-runs in 2 hours). The runner credential should run a real Pro/Max subscription with no other workload on it; v4.4.1's `HOME=/root/.claude-runner` isolation already gives it its own token pair within the same account, but if you want a fully separate subscription pool too, log into a different account during `dario login --manual` against that HOME.
+
+### Why a patch
+
+Same shape as v4.4.1 / v4.6.1 / v4.6.2 — operational hardening on the runner workflow surface. No `src/` changes. Docs + workflow only.
+
+### Internal
+
+- One workflow line changed (`compat-test-self-hosted.yml` Run compat tests step)
+- `docs/drift-monitor.md`: new section "Runner credential rate-limit headroom"
+- 75/75 default suite green
+
+## [4.6.2] - 2026-05-17
+
+### Fixed — runner workflows actually use port 3457 now
+
+v4.6.1 declared `--port 3457` (space-separated) for both runner workflows to avoid the platform's existing dario at `:3456`. dario's CLI only accepts `--port=3457` (equals-separated) — the space-separated form silently falls through to the default 3456. Result: v4.6.1's compat-test on PR #313 still bound to :3456, still short-circuited to the platform's dario.
+
+We caught the bug because v4.6.1's compat-test on PR #313 failed with the same `dario — already running on http://localhost:3456` proxy.log output v4.6.1 claimed to fix. That's actually the system working as designed — the runner is now testing the right binary frequently enough that bugs in the harness can't hide.
+
+**Fix.** Six `--port 3457` → `--port=3457` substitutions across the two workflow files. Same change in spirit as v4.6.1; same change in code as a one-character typo.
+
+### Why a patch
+
+Same shape as v4.4.1 and v4.6.1 — operational hardening. The previous behavior wasn't *wrong* in any user-visible way; the workflows just weren't binding the port they claimed to. No `src/` changes.
+
+### Internal
+
+- Two workflow files updated (`compat-test-self-hosted.yml`, `cc-billing-classifier-canary.yml`)
+- No `src/` edits, no tests changed
+- 75/75 default suite green
+
+## [4.6.1] - 2026-05-17
+
+### Fixed — runner workflows now actually test the PR's dist
+
+When v4.6.0's billing canary first ran on the production runner, it returned `representative-claim: ''` and a 401 — but the runner's `claude --print` smoke test passed cleanly. Investigation revealed both runner workflows had been silently piggybacking on the platform's existing dario instance (the `askalf-dario` docker container at port 3456), not the freshly-built `dist/` they were supposed to test.
+
+**Mechanism.** `dario proxy` has a friendly EADDRINUSE handler: when its target port is occupied, it probes `/health`, sees an existing dario, prints "dario — already running" and exits 0 (so users running `dario login` or `dario proxy` twice get a no-op instead of a crash). On the production runner, the platform's docker `askalf-dario` already binds :3456 — so the workflow's `dario proxy` short-circuits, the workflow's curls hit the platform's dario, and the platform's auth (`/root/.claude/.credentials.json`, not `/root/.claude-runner/.claude/.credentials.json`) services them. For the canary, that returned 401 because the platform's credential happens to be on a different account state right now. For compat-test, every PR check has been validating the platform's dario binary, not the PR's — which means several recent PRs (#303, #304, #306, #308, #310, #311) were never actually compat-tested.
+
+**Fix.** Both runner workflows now bind `--port 3457` and the test harnesses read `DARIO_TEST_URL=http://127.0.0.1:3457`. Eliminates the port collision with the platform dario.
+
+- [`compat-test-self-hosted.yml`](.github/workflows/compat-test-self-hosted.yml): `Start dario proxy` adds `--port 3457`, env adds `DARIO_TEST_URL=http://127.0.0.1:3457` for both Start + Run steps; readiness probe + comment fallback all point at :3457.
+- [`cc-billing-classifier-canary.yml`](.github/workflows/cc-billing-classifier-canary.yml): `Start dario proxy` adds `--port 3457`; canary curl posts to `:3457/v1/messages`.
+
+**Validation.** Local manual run on the production runner with these flags (`HOME=/root/.claude-runner dario proxy --port 3457`) — proxy started cleanly, `/health` responded, single tiny haiku request returned 200, `representative-claim` header was a subscription value. Confirms the workflow path will resolve to a subscription bucket once the fix lands.
+
+### Why a patch
+
+Pure operational hardening — same vintage as v4.4.1 (workflow env fix). The previous behavior wasn't "wrong" in any user-visible way; the workflows just weren't testing what they advertised. No `src/` changes.
+
+### Internal
+
+- Two workflow files updated
+- No `src/` edits, no new tests (the existing tests run unchanged; what changes is *which* dario binary they hit)
+- 75/75 default suite green
+
+## [4.6.0] - 2026-05-17
+
+### Added — daily billing classifier canary
+
+The template-drift watcher catches "Anthropic changed what CC sends on the wire." It does **not** catch the orthogonal failure mode: **Anthropic changes what their classifier *reads* on the wire.** CC could keep emitting bit-identical requests forever and still get reclassified out of the subscription bucket if Anthropic adds a new signal, tightens an existing one, or flips a threshold. v4.6.0 introduces the third probe in the drift-detection trinity.
+
+**New workflow:** [`cc-billing-classifier-canary.yml`](.github/workflows/cc-billing-classifier-canary.yml). Runs daily at 06:30 UTC on the same self-hosted runner. Steps:
+
+1. Start `dario proxy` in **canonical-rebuild** mode (no `--passthrough` — the canary specifically validates the rebuild plane every non-CC dario user runs in).
+2. Wait for `/health`.
+3. Send one tiny haiku request through dario.
+4. Read the `representative-claim` (or `anthropic-ratelimit-unified-representative-claim`) response header.
+5. Classify per `src/analytics.ts`:
+   - `five_hour` / `seven_day` → **subscription** (pass)
+   - `*_fallback` → **subscription_fallback** (pass, rate-limit only)
+   - `overage` → **extra_usage** (fail — dario users being billed per-token right now)
+   - `api` → **api** (fail — credential on the wrong account class)
+   - anything else → **unknown** (warn — header missing or unrecognized value)
+6. Open / update / close a `cc-billing-canary`-labeled alert based on verdict.
+
+**Self-healing label** (`gh label create ... 2>/dev/null || true`) so the workflow works on first run without separate setup.
+
+**Cost.** ~1 small subscription request per day (haiku, 16 output tokens cap). Trivial relative to the signal value.
+
+**Why a separate workflow from `cc-drift-template-watch.yml`.** Different cadence (daily vs every 30 min), different signal class (classifier rules vs wire shape), different alert label so investigators can tell them apart. The two are complementary: a real classifier change will probably correlate with a CC wire-shape change, and both watchers will fire — but having them as separate signals lets you tell *which* dimension shifted.
+
+### Updated — `docs/drift-monitor.md`
+
+Adds a Class C section describing the canary. Three classes of drift, three workflows, one self-hosted runner.
+
+### Tests
+
+- 75/75 default suite green (no `src/` changes; new workflow + docs only)
+
+### Why a minor bump
+
+New observable surface (alert issue label `cc-billing-canary`, subscription-bucket assertion contract). Anyone monitoring repo activity sees a new alarm type. No code change.
+
+### Internal
+
+- One new workflow file: `.github/workflows/cc-billing-classifier-canary.yml`
+- `docs/drift-monitor.md`: Class C added
+- No `src/` changes
+
+## [4.5.0] - 2026-05-17
+
+### Added — drift reports embed unified-diff snippets
+
+Pre-v4.5.0, a class-B drift report read like `system_prompt content changed (12716 → 12719 chars, delta +3)`. Useful as a tripwire; useless for triage. A reviewer had to fetch the bot's auto-rebake PR, inspect the diff, then come back to decide ship-or-investigate. v4.5.0 shortens that to "read the issue, decide" by embedding the actual content delta.
+
+### Mechanism
+
+Drift detection moved from inline in `scripts/capture-and-bake.mjs` to a dedicated `scripts/drift-report.mjs` module (testable without spawning live CC). Each drift entry now has a `summary` plus an optional `detail` array — rendered as a bullet with indented sub-lines. New helpers:
+
+- **`unifiedDiff(prev, now, opts)`** — line-level diff between two text blobs. LCS-table backtrack, `contextLines`/`maxLines` bounded for issue/PR embedding. Empty array when inputs are identical. Used for `system_prompt` and `agent_identity` slots.
+- **`describeTool(tool)`** — for `tools added`/`tools removed`, returns the tool's name + first-line description (capped) + `input_schema.properties` keys, so a reviewer can see *what the tool does* without leaving the issue.
+- **`formatDriftReport(diff)`** — renders the rich entries as indented bullets for `--check` log output.
+
+### Detail coverage by slot
+
+| Drift slot | Detail format |
+|---|---|
+| `tools added` / `tools removed` | per-tool: name, first-line description, input-schema property keys |
+| `system_prompt` content | bounded unified-line diff with ±2 context lines |
+| `agent_identity` content | bounded unified-line diff with ±2 context lines |
+| `body_field_order` | before / after JSON arrays |
+| `header_order` | before / after JSON arrays |
+| `anthropic_beta` added/removed | (no detail — summary names the betas) |
+
+### Tests
+
+- **New file `test/bake-drift-report.mjs`** — 19 headers, 42 assertions covering: identical/empty inputs returning empty diff, single-line / insertion / deletion / multi-hunk cases, `maxLines` cap, `describeTool` graceful on missing fields, per-slot drift detection, multi-axis aggregation, `formatDriftReport` indentation contract.
+- 75/75 default suite green (74 + the new file).
+
+### Why a minor bump
+
+`--check` output and drift-issue body shape are externally observable surfaces — they're embedded verbatim in workflow issue bodies and PR descriptions. Anyone scraping those (or hand-pasting them into a ticket) sees a new shape. Internal-only refactor would be a patch; user-visible-text-shape change is a minor.
+
+### Internal
+
+- Two new files: `scripts/drift-report.mjs`, `test/bake-drift-report.mjs`
+- `scripts/capture-and-bake.mjs` slimmed down — inline drift helpers removed, imports from `./drift-report.mjs` instead
+- No `src/` changes
+- No runtime dependencies added
+
+## [4.4.2] - 2026-05-17
+
+### Added — drift watcher liveness alarm
+
+The v4.2.2 watcher catches class-B drift on a self-hosted runner. If that runner goes offline silently — Hetzner reboot, container crash, OAuth credential revoked, CC binary missing — class-B drift goes uncaught and nothing notices. v4.4.2 closes that gap.
+
+**New workflow:** [`cc-drift-watcher-liveness.yml`](.github/workflows/cc-drift-watcher-liveness.yml). Runs every 2 hours on a github-hosted runner. Queries the most recent `success` run of [`cc-drift-template-watch.yml`](.github/workflows/cc-drift-template-watch.yml) via the GitHub API; if the latest success is more than 3 hours old (≥ 6 missed 30-min cycles), opens a `cc-watcher-liveness`-labeled alert with diagnosis hints. Auto-closes the alert when the watcher next succeeds.
+
+**Survival rationale.** The liveness workflow lives on github-hosted infrastructure deliberately — it has no Pro/Max session, no OAuth credential, no dependency on the self-hosted runner. It survives the exact failure modes it's designed to detect. The only thing that takes both down is GitHub Actions itself, in which case there are other ways to find out.
+
+**Cron offset.** Schedule is `15 */2 * * *` (every 2 hours at :15) so it never overlaps with the watcher's `*/30 * * * *` (every 30 min at :00 and :30). Avoids the "alarm fires during the watcher's run" case.
+
+**Self-healing label.** Workflow includes `gh label create cc-watcher-liveness ... || true` before any issue op so the alarm is functional on first run without a separate setup step.
+
+**Threshold rationale.** 3 hours = 6 missed 30-min cycles. Strict enough to catch real outages (anything > 1 hour of failure is signal, not noise), loose enough to absorb a single transient infra hiccup + GitHub Actions cron skew on hot start (~5 min real-world).
+
+### Tests
+
+- 74/74 default suite green (no `src/` changes)
+
+### Why a patch
+
+Pure operational hardening. New workflow file, docs update, version bump. No `src/` edits.
+
+### Internal
+
+- No runtime code changes
+- One new workflow file: `.github/workflows/cc-drift-watcher-liveness.yml`
+- `docs/drift-monitor.md`: documents the liveness watcher
+
+## [4.4.1] - 2026-05-17
+
+### Fixed — runner OAuth credential isolated from shared `/root/.claude/`
+
+The v4.2.2 walkthrough seeded the runner's CC credential at `/root/.claude/.credentials.json`. On a box that also hosts other CC clients sharing that path — e.g. docker services that mount the host's `/root/.claude/` as a credentials volume — both clients use the same access/refresh token pair. When either refreshes, the other's token can be silently invalidated until its next refresh attempt. We hit one such 401 during v4.2.2 setup; the 30-min cron cadence absorbed it, but it's a real failure mode for high-frequency setups.
+
+**Fix.** Both runner workflows now pin `HOME: /root/.claude-runner` on every step that spawns CC. Setup writes the runner's credential to `/root/.claude-runner/.claude/.credentials.json`, isolated from `/root/.claude/`. Refreshes on the two paths are now independent.
+
+- [`cc-drift-template-watch.yml`](.github/workflows/cc-drift-template-watch.yml): `Run drift check` and `Auto-rebake + open PR` steps both get `env: HOME: /root/.claude-runner`.
+- [`compat-test-self-hosted.yml`](.github/workflows/compat-test-self-hosted.yml): `Start dario proxy (passthrough mode)` step gets the same.
+- [`docs/drift-monitor.md`](docs/drift-monitor.md): updated to document the isolated-credential flow as the recommended pattern for boxes that share the host with other CC clients (the simpler `~/.claude/.credentials.json` default still works for runner-only boxes).
+
+**Verification.** Generated a fresh OAuth credential on the production runner via `HOME=/root/.claude-runner dario login --manual`. `dario` writes its credentials to `~/.dario/credentials.json` but CC reads from `~/.claude/.credentials.json` — same JSON format though (top-level `claudeAiOauth` key), so the setup mirrors the file. `claude --print` returns PONG against the isolated credential; full `--check` against the runner's clone reports `no drift detected. exit 0`. The platform's `/root/.claude/.credentials.json` is untouched.
+
+### Why a patch (not minor)
+
+Pure operational hardening. No user-visible API change, no end-user runtime behavior change, no code change in `src/`. Two workflow files and one docs file modified.
+
+### Internal
+
+- No `src/` edits
+- No new tests (the env var change is exercised end-to-end by the next watcher/compat-test cycle)
+- 74/74 default suite green
+
+## [4.4.0] - 2026-05-17
+
+### Added — auto-rebake on class-B drift detection
+
+Closes the manual-remediation step in the drift loop. The pre-v4.4.0 cycle was: detection → issue opened → **maintainer SSHes into a CC-installed machine** → runs `capture-and-bake.mjs` → reviews diff → commits → opens PR → merges → issue auto-closes. v4.4.0 replaces the three middle steps with a bot, mirroring [`cc-drift-watch.yml`](.github/workflows/cc-drift-watch.yml)'s class-A auto-PR pattern.
+
+The updated [`cc-drift-template-watch.yml`](.github/workflows/cc-drift-template-watch.yml) workflow now, on exit-2 from `--check`:
+
+1. Skips if a `bot/template-rebake-*` PR is already open (de-dup by branch-name prefix).
+2. Runs `node scripts/capture-and-bake.mjs` (real write, not `--check`). Bake already preserves Windows-only tools from the previous bundle (v4.2.2 platform-superset preservation) and re-sorts alphabetically.
+3. Bails with a workflow warning if the bake produced no diff vs HEAD (catches the rare transient where `--check` and the real bake disagree — e.g. classifier-sensitive content that scrubs differently between runs).
+4. Commits to `bot/template-rebake-YYYYMMDD-HHMMSS` as `cc-drift-template-watch[bot]`, pushes, opens a PR labeled `cc-drift-template`.
+5. The drift issue body is then expanded with a link to the open PR (or a "rebake skipped" note if step 3 short-circuited).
+
+**Not auto-merged.** The bundled template is the wire-shape contract for non-CC clients (Cursor, Aider, Cline — anything dario rebuilds-from-canonical for). [`compat-test-self-hosted.yml`](.github/workflows/compat-test-self-hosted.yml) auto-fires on the PR because the path filter includes `src/cc-template-data.json`, validating the **passthrough** plane. The rebuild-from-canonical plane isn't currently exercised by an end-to-end test, so a human eyes the diff and clicks merge. Once merged, the next watcher cycle exits 0 and auto-closes the drift issue.
+
+**Workflow permission bump.** `contents: write` (was `read`) so the bot can push to `bot/*` branches; `pull-requests: write` (added) so it can open the PR. Master is still protected — the bot cannot push there directly; only the PR path is open.
+
+### Added — compat-test path filter widened
+
+[`compat-test-self-hosted.yml`](.github/workflows/compat-test-self-hosted.yml) now also fires on PRs touching `src/scrub-template.ts` and `scripts/capture-and-bake.mjs`. The v4.3.1 scrubber fix would not have triggered the compat gate under the old filter — exactly the regression class the gate is supposed to catch.
+
+### Tests
+
+- 74/74 default suite green (no src/ changes)
+
+### Why a minor bump
+
+The bot now opens PRs autonomously and pushes to repo branches it didn't push to before. Behavioral change to the bot surface, even though end-user runtime code is unchanged.
+
+### Internal
+
+- No runtime code changes
+- No `src/` edits
+- Two workflow files modified: `cc-drift-template-watch.yml` (auto-rebake), `compat-test-self-hosted.yml` (path filter)
+
+## [4.3.1] - 2026-05-17
+
+### Fixed — scrubber strips CC's gitStatus block
+
+v4.2.2's `--check` drift watcher started cycling on the self-hosted runner and flagged drift on its first cron tick: `system_prompt content changed (12716 → 12719 chars, delta +3)`, just 27 minutes after a clean bake. Investigation traced the +3 chars to **the bake-host's gitStatus block being baked into the bundled template**.
+
+CC emits gitStatus as a plain-text label (`\ngitStatus:`) at the end of the system prompt — distinct from the markdown-heading sections (`# Environment`, `# auto memory`, `# claudeMd`, `# userEmail`, `# currentDate`) the scrubber already strips. The pre-v4.3.1 scrubber's `HOST_CONTEXT_SECTION_HEADINGS` list included `'gitStatus'` but only checked for the markdown-heading form `\n# gitStatus\n`, which CC doesn't emit. The "defensive" entry was for the wrong syntactic shape.
+
+**Effect of the bug:**
+
+1. The bundled template carried the maintainer's branch, modified-file list, and recent-commits log into every brand-new dario install's very first request. Pure information leak of the bake host's repo state.
+2. The drift watcher fired a false positive on every bake-host git state change — branch switches, new commits, file modifications during the bake. Made the watcher's signal-to-noise ratio approach zero.
+
+**Fix.** New `removeGitStatusBlock()` in `src/scrub-template.ts`. Anchored on `\ngitStatus:` prefix, runs to the next `\n# ` markdown heading or end of string. Idempotent. Three new test cases in `test/scrub-template.mjs` (EOF case, mid-prompt followed-by-heading case, idempotency).
+
+### Template re-bake
+
+`src/cc-template-data.json` re-baked from the same Linux host (CC 2.1.143) with the corrected scrubber. Diff vs v4.3.0:
+
+| Slot | v4.3.0 | v4.3.1 | Notes |
+|---|---|---|---|
+| `_version` / `_supportedMaxTested` | 2.1.143 | 2.1.143 | unchanged |
+| `tools` count + order | 29 | 29 | identical (Linux 28 + preserved PowerShell, alphabetical) |
+| `system_prompt` length | 12716 chars | 12332 chars (-384) | gitStatus block stripped |
+| `anthropic_beta`, `body_field_order`, `header_order`, `agent_identity` | unchanged | unchanged | structural shape held |
+
+**Validation.** Two consecutive captures on the runner box (4 min apart, raw captures differ in the gitStatus block by ~20 chars) produce byte-identical scrubbed templates. `--check` exit 0: "no drift detected". The drift watcher's signal is now pure Anthropic-side drift.
+
+### Tests
+
+- `test/scrub-template.mjs` — 11 new assertions across 3 new headers (12, 13, 14) covering gitStatus stripping
+- 74/74 default suite green
+
+### Why a patch (not minor)
+
+Pure bug fix. The runtime behavior of any dario install built against v4.3.1 is identical to v4.3.0 except for the contents of the bundled fallback template — and dario users on their own machines hit a live capture on first refresh anyway, so the bundle change only affects the very first request from a fresh install. The user-visible contract is unchanged.
+
+## [4.3.0] - 2026-05-17
+
+### Added — PR-time compat test on the self-hosted runner
+
+v4.2.2 added the [self-hosted drift watcher](.github/workflows/cc-drift-template-watch.yml) that catches wire-shape divergences **after** release. v4.3.0 catches them **before** merge.
+
+`.github/workflows/compat-test-self-hosted.yml` runs `node test/compat.mjs` against a live `dario proxy --passthrough` on the same `[self-hosted, dario-drift]` runner the watcher uses. The test sends ~11 small subscription requests through the proxy and verifies: streaming framing (event/data pair correctness, message_start/_stop ordering), tool use (sync + streaming), OpenAI-compat path, header pass-through (request-id, ratelimit-*), no thinking-injection in passthrough mode, and client-beta preservation.
+
+Github-hosted runners can't host this — no Pro/Max subscription session, no OAuth credential. Until v4.3.0 the suite existed in the repo (`test/compat.mjs`) but never ran in CI, which meant wire-shape regressions surfaced only after merge (and often only after the drift watcher pinged them, often days later for subtle ones). Now they surface as a failing PR check before merge.
+
+**Trigger surface — path-filtered to keep runner cycles cheap.** Runs only on PRs that touch:
+
+- `src/proxy.ts` — the proxy entrypoint
+- `src/cc-template.ts` — the wire-shape builder
+- `src/cc-template-data.json` — the bundled template fallback
+- `src/streaming/**` / `src/sse/**` — streaming code paths
+- `src/shim/runtime.cjs` — shim deprecation period
+- `test/compat.mjs` — the test itself
+- the workflow file itself
+
+PRs touching only docs, README, unrelated tests, or other CI skip the job entirely. Maintainer-triggered `workflow_dispatch` is always available regardless of paths.
+
+**Fork-PR guard.** A self-hosted runner with credentials must never execute arbitrary code from forks. The job guards `if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository`. Fork PRs are visible but don't run on the runner; maintainers can manually dispatch after review.
+
+**Concurrency cancellation.** New commits to a PR cancel the previous in-flight run on the same ref. Saves runner time and subscription requests during rapid push iterations.
+
+**PR comment de-dup.** The workflow posts a single status comment per PR (✅/❌ + tail of compat output + run URL), then updates that comment on subsequent runs rather than stacking. Recognized by a `<!-- dario-compat-test -->` HTML marker.
+
+### Cost
+
+~11 small subscription requests per qualifying PR run, ~10–20s of runner wall time. The path filter is the cost lever: the wire-shape surface is the file set that benefits from the test, and only those PRs incur the spend.
+
+### Tests
+
+74/74 default suite green. No new tests added — the value is running an *existing* test (`test/compat.mjs`) in CI where it couldn't run before.
+
+### Why a minor bump (not patch)
+
+v4.2.2 was a patch because the drift watcher infrastructure was purely additive — no PR-gate behavior change. v4.3.0 introduces a **new PR check that can block merges**: a developer's PR can now fail compat. That's a behavioral change to the contribution flow, even though the runtime code is untouched. Semver-wise: minor.
+
+### Internal
+
+- No runtime code changes
+- No `src/` edits
+- Workflow file `.github/workflows/compat-test-self-hosted.yml` is the entire surface
+
+## [4.2.2] - 2026-05-17
+
+### Added — automated drift detection for same-binary remote-config drift
+
+[v4.2.1](#421---2026-05-17) documented "drift class B": Anthropic ships wire-shape changes through CC's remote configuration without bumping the npm version — same binary on disk, different `/v1/messages` body 24 hours apart. The existing [`cc-drift-watch.yml`](.github/workflows/cc-drift-watch.yml) catches **class A** (new npm releases) on a free GitHub-hosted runner. It cannot see class B because there's no new binary to diff. v4.2.2 closes the loop.
+
+**`scripts/capture-and-bake.mjs --check`** — new dry-run mode. Captures + scrubs a fresh template from the live CC install but doesn't write to disk; instead diffs against the committed bundle. Exits 0 (no drift), 1 (infra failure — CC missing, capture timeout, scrub leak), or 2 (drift detected vs current bundled template). Compares tool names, anthropic_beta header values, system_prompt content, body_field_order, header_order, and agent_identity; deliberately ignores transient fields (`_captured` timestamp, user-agent string).
+
+**`.github/workflows/cc-drift-template-watch.yml`** — new self-hosted-runner workflow. Runs `--check` every 30 min against a live, authenticated CC install on a `[self-hosted, dario-drift]`-labeled runner. On exit 2, opens (or comments on) a single `cc-drift-template`-labeled issue with the drift report. On exit 0 with an open drift issue, closes it with a confirmation comment. De-duped by label so the issue tracks "is the bundled template currently stale" as a binary state.
+
+**`docs/drift-monitor.md`** — operator-facing walkthrough. Two-class drift model, exit-code semantics, runner setup (Node 22 + CC + `dario login --manual` OAuth + GitHub Actions runner registration + systemd service), how to read a drift issue, how to re-bake.
+
+### Added — platform-superset preservation in `capture-and-bake.mjs`
+
+CC ships platform-specific tools (currently `PowerShell` on Windows; future surface). The bundled template is meant to be a **union** across platforms, filtered down at request time by `filterToolsForPlatform()`. A bake on Linux therefore must not silently drop the Windows-only tool set.
+
+`capture-and-bake.mjs` now reads the previous bundle and merges in any tools listed in `PLATFORM_ONLY_TOOLS` (exported from `src/cc-template.ts`) for a platform other than the bake host's. The combined set is re-sorted alphabetically by name to match CC's wire order. The runner can therefore bake from Linux without regressing Windows users. Logged at bake time: `preserved 1 other-platform tool from previous bundle: PowerShell`.
+
+### Template re-bake — Linux baseline
+
+`src/cc-template-data.json` re-baked from a Linux capture (the v4.2.1 bake was from Windows). Diff vs v4.2.1:
+
+| Slot | v4.2.1 (Win bake) | v4.2.2 (Linux + preserved) | Notes |
+|---|---|---|---|
+| `_version` / `_supportedMaxTested` | 2.1.143 | 2.1.143 | Unchanged — within-version drift |
+| `tools` count | 29 (incl. PowerShell from native Win capture) | 29 (28 Linux-captured + PowerShell preserved) | Set identical, ordering identical |
+| `anthropic_beta` includes `afk-mode-2026-01-31` | YES | **NO** (CC stopped sending it within 1 hour of v4.2.1 bake) | Genuine class-B drift, caught by the first `--check` from the runner |
+| `system_prompt` length | 13015 chars | 12716 chars (-299) | Mostly host-context fields the scrubber handles per-platform |
+
+Most dario users run on Linux/macOS. A Linux-baked bundle is a closer representative for the majority platform and gives the drift watcher (which runs on Linux) a like-for-like comparison going forward. Windows tools survive via preservation.
+
+### Tests
+
+- 74/74 default suite green against the re-baked template
+- No new test files needed — existing `test/platform-tools.mjs` covers the filter logic; existing `test/scrub-template.mjs` covers the scrub path; `--check` itself is a thin layer over `computeDrift()` whose surface is the workflow
+
+### Internal
+
+- `src/cc-template.ts`: `PLATFORM_ONLY_TOOLS` changed from module-local `const` to `export const` so `capture-and-bake.mjs` can import it (the only call site outside the file is the bake script). No runtime effect.
+
+## [4.2.1] - 2026-05-17
+
+### Fixed — CC v2.1.143 default-pin drift + remote-config receipts
+
+Two pin updates and a fresh template re-bake. Same CC v2.1.143 binary on disk as yesterday (`.local/bin/claude.exe` last modified 2026-05-15), but the wire shape it emits has changed — three separate diffs verified via `scripts/capture-full-body.mjs` against the live binary on 2026-05-17. Anthropic is shipping wire-shape changes through remote configuration, not just through CC npm releases.
+
+**Default pins (out of sync with current CC):**
+
+- `DEFAULT_MAX_TOKENS` bumped **32000 → 64000** (`src/cc-template.ts:944`). Tracks CC's current wire default. Evolution: 32000 (v2.1.116) → 64000 (v2.1.143). Hardcoded value was last updated against v2.1.116; CC moved without a corresponding npm-release-note.
+- `resolveEffort` default bumped **`'high'` → `'xhigh'`** (`src/cc-template.ts:981`). Tracks CC's evolving `output_config.effort` wire value. Evolution: `'medium'` (v2.1.116, Apr 2026 — documented in [Discussion #13](https://github.com/askalf/dario/discussions/13)) → `'high'` (mid-May) → `'xhigh'` (v2.1.143, May 17). Same binary, three different values within six weeks.
+
+**Template re-bake — same binary, different output:**
+
+Re-baked `src/cc-template-data.json` from a fresh live capture. Diff vs. yesterday's bake (also from CC v2.1.143):
+
+| Slot | 2026-05-16 bake | 2026-05-17 bake | Notes |
+|---|---|---|---|
+| `tools` count | 30 (incl. `ShareOnboardingGuide`) | **29** (`ShareOnboardingGuide` removed) | Anthropic pulled the tool they added the day before |
+| `anthropic_beta` includes `context-1m-2025-08-07` | NO (dropped per the v2.1.142 silent drift) | **YES** | The beta is back in CC's header set. Whether OAuth still rejects it server-side is a separate question (per-account-rejected-beta cache handles the edge case automatically; if Anthropic now accepts, subscribers regain 1M context) |
+| `system_prompt` length | 13,369 chars | 13,015 chars (-354) | Minor revision |
+| `body_field_order`, `header_order`, `agent_identity` | unchanged | unchanged | structural shape held |
+
+**The receipt-log significance.** Until today, dario's drift-watch story was "Anthropic ships silent wire-shape changes between CC npm releases." This release is the first concrete evidence that they also ship them **within the same npm release**, via remote configuration that flips behavior without bumping any version anywhere. The same `claude.exe` on disk that produced template A yesterday produces template B today. Five distinct wire-shape diffs in 24 hours, zero changelog entries from Anthropic, all caught by `scripts/capture-full-body.mjs` + the bake script.
+
+[Discussion #13](https://github.com/askalf/dario/discussions/13) was updated this morning with the medium → high → xhigh evolution receipts in a reply to a user question.
+
+### Tests
+
+- `test/effort-flag.mjs` — 7 assertions updated from `'high'` → `'xhigh'` defaults
+- `test/hermes-compat.mjs` — 1 assertion updated from `32000` → `64000` default
+- 74/74 default suite green
+
+### Internal
+
+- No new tests (the existing effort-flag + hermes-compat assertions are the regression net for these defaults)
+- No new files
+- No CHANGELOG entry needed for the template bake itself; the diff is the receipt
+
+## [4.2.0] - 2026-05-16
+
+### Deprecated — `dario shim` (removal scheduled for v5.x)
+
+Shim mode is deprecated. It still works; it now emits a loud banner on every invocation pointing users at proxy mode. Set `DARIO_SHIM_NO_DEPRECATION_WARNING=1` to suppress the banner for scripts that have already migrated their understanding.
+
+**Why now.** A side-by-side fingerprint diff of `src/shim/runtime.cjs:_rewriteBody` against the proxy's `buildCCRequest` (run against a representative `claude -p` body) confirmed shim only normalizes a subset of the wire-shape axes Anthropic's billing classifier inspects:
+
+| Discussion #13 axis | Proxy | Shim |
+|---|---|---|
+| System block count (3) | ✅ rebuilt | ✅ replaces system[1] and system[2] |
+| Agent identity / system prompt | ✅ rebuilt | ✅ replaced |
+| Header order | ✅ replayed | ✅ replayed |
+| Tools array | ✅ replaced with CC's 30 tools | ✅ replaced (when system shape matches) |
+| **JSON key order** | ✅ canonical CC order | ❌ client's order passes through |
+| **max_tokens** | ✅ pinned to 32000 (or `--max-tokens` override) | ❌ client's value passes through |
+| **metadata (rolling SHA-256 billing tag)** | ✅ synthesized per request | ❌ client's tag (or absent field) passes through |
+| **Non-CC body fields** (temperature, top_p, service_tier) | ✅ stripped | ❌ pass through |
+
+For interactive Claude Code (`dario shim -- claude`), this is mostly a no-op because CC's own outbound already matches every axis dario would synthesize. But the *advertised* use case — `dario shim -- aider`, `dario shim -- cline`, your own scripts — was always under-protected. And shim's `_rewriteBody` hardcodes a `system.length === 3` shape check; on the 1-block-system shape that `claude -p` and Agent-SDK both emit, shim returns `null` and falls back to **total passthrough** — the client's raw body reaches `api.anthropic.com` unchanged. Documented at <https://github.com/askalf/dario/blob/master/src/shim/runtime.cjs#L117-L143>.
+
+**Migration path.** Two terminals instead of one:
+
+```sh
+# old (deprecated):
+dario shim -- aider --model claude/claude-opus-4-7
+
+# new (proxy mode — wire-shape parity across all 8 axes):
+dario proxy &                                   # terminal 1
+export ANTHROPIC_BASE_URL=http://localhost:3456
+export ANTHROPIC_API_KEY=dario
+aider --model claude/claude-opus-4-7            # terminal 2 (or same after env exports)
+```
+
+**Help text + README updated** to surface the deprecation everywhere shim is referenced.
+
+### Why a minor bump (not patch)
+
+Deprecating a public surface is a behavioral change — users running `dario shim` non-interactively will see a banner on stderr they weren't seeing before. Even though shim itself still executes the same code path, the user-visible contract changed. Semver-wise: a clean MINOR.
+
+### Internal
+
+- `src/cli.ts:shim()` — deprecation banner block, `DARIO_SHIM_NO_DEPRECATION_WARNING=1` escape hatch.
+- `src/cli.ts:help()` — shim entry rewritten to lead with `[DEPRECATED …]`.
+- `README.md` — Capabilities entry rewritten with the empirical-gap explanation.
+- No changes to `src/shim/runtime.cjs` or `src/shim/host.ts` (shim still functions; just deprecated).
+- No new tests; existing shim test files (`test/shim-runtime.mjs`, `test/shim-e2e.mjs`) continue to validate the in-process fetch-patch mechanics unchanged.
+
+## [4.1.1] - 2026-05-16
+
+### Fixed
+
+- **`dario resume`** connection-error message now fires the friendly "no proxy running" hint across all supported runtimes. Pre-fix, the regex only matched Node's `ECONNREFUSED` / `fetch failed`, so users on Bun (the recommended runtime for TLS-ClientHello matching) saw the raw `"Unable to connect"` error instead. Broadened the match to `ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|fetch failed|unable to connect|getaddrinfo` (case-insensitive). Caught during the v4.1.0 live e2e against a Bun-runtime install.
+
+### Polish — v4.1 discoverability
+
+- **`dario help`** now lists the `dario resume` command and the four new overage-guard flags (`--no-overage-guard`, `--overage-behavior=halt|warn`, `--overage-cooldown=<ms>`, `--no-overage-notify`) with their corresponding `DARIO_OVERAGE_*` env vars. The functionality shipped in v4.1.0 but the help text was a static string that didn't get updated alongside the dispatch wiring.
+- **README** — added a "What dario does when overage lands (v4.1)" section with the halted Status-tab mockup and the Anthropic-shaped 503 body; extended the "New in v4" callout with the v4.1 line; added an active-overage-protection bullet to Capabilities; refreshed Trust & transparency numbers (~18.5k LOC / 44 files / 80 test files / 74 default-suite); added `resume` to the Commands list; extended the v4 TUI FAQ entry with the v4.1-era tab changes; added a new FAQ Q for the overage path.
+- **TUI Config tab** — string-enum fields now validate at commit time and surface an error in the status line on bad input, rather than silently saving an invalid value the proxy's `sanitize()` would drop on next load. `overageGuard.behavior` is the first enum to use the new path (`"halt"` or `"warn"` only). `overageGuard.cooldownMs` rejects negatives at commit time.
+- **`cc-drift-auto-release.yml` header comment** — corrected the inaccurate "loop protection suppresses `pull_request:closed` for bot-auto-merged PRs" note. Verified across v4.0.0, v4.0.1, v4.1.0: `gh pr merge --auto` attributes to the queueing user (not GITHUB_TOKEN), so the fast path fires normally. The hourly schedule fallback still exists for the genuine bot-token-merge case (e.g. the cc-drift-watch workflow auto-merging its own draft) where GitHub really does suppress downstream workflows.
+
+No functional changes to the proxy or the overage-guard itself; this is a polish release after v4.1.0's live e2e.
+
+## [4.1.0] - 2026-05-16
+
+### Major — overage-guard (active protection against the billing classifier)
+
+dario now halts itself the moment a single response carries `representative-claim: overage`. Subscribers should never see an overage hit during normal operation — one means traffic is being reclassified to per-token billing (wire-shape drift, classifier change, account misconfig), and continuing to forward requests bleeds real money. v4 surfaced this state passively in the TUI's Hits tab; v4.1 turns that visibility into active protection.
+
+**What happens on an overage hit:**
+
+- Proxy state flips to `halted`. Every subsequent `/v1/messages`, `/v1/complete`, `/v1/chat/completions` request returns `503` with an Anthropic-shaped error body:
+  ```json
+  {
+    "type": "error",
+    "error": {
+      "type": "dario_overage_guard",
+      "message": "dario halted to prevent API-rate bleed. A request was classified as 'overage' (per-token billing) instead of your subscription pool. To resume: run `dario resume` in another terminal, or wait until <ISO ts> for the cooldown to auto-clear. Details: github.com/askalf/dario/issues/288"
+    }
+  }
+  ```
+  The Anthropic shape means CC / Cursor / Aider / Cline surface the message verbatim — no client-specific handling needed.
+- TUI Status tab shows the halt banner with the triggering request (model, account, claim) and a live countdown to auto-resume.
+- TUI Hits tab pins a red `⚠ HALTED` banner at the top and renders historical overage rows in red.
+- TUI Analytics tab gains an Overage bar alongside 5h/7d — empty in normal operation, red the moment count is non-zero.
+- Best-effort native desktop notification fires (osascript on macOS, notify-send on Linux, BurntToast on Windows). Terminal BEL is the unconditional floor.
+- SSE stream emits a named `event: overage_halt` frame so any subscriber sees the state in real time. Resume emits `event: overage_resume`.
+
+**Resume paths:**
+
+- `dario resume` (new CLI command) → POST `/admin/resume` → clear immediately.
+- TUI Status tab → `R` key → same endpoint.
+- Auto: cooldown timer expires (default 30 min) → clear with reason=cooldown.
+
+**Configuration** (`~/.dario/config.json` → `overageGuard`):
+
+```json
+{
+  "overageGuard": {
+    "enabled": true,
+    "behavior": "halt",
+    "cooldownMs": 1800000,
+    "notifyOs": true
+  }
+}
+```
+
+CLI flags: `--no-overage-guard`, `--overage-behavior=halt|warn`, `--overage-cooldown=<ms>`, `--no-overage-notify`.
+Env vars: `DARIO_OVERAGE_GUARD`, `DARIO_OVERAGE_BEHAVIOR`, `DARIO_OVERAGE_COOLDOWN`, `DARIO_OVERAGE_NOTIFY`.
+
+`behavior: "warn"` keeps the proxy forwarding but still fires events + notifications — visibility-only mode for users who want to see the signal without disrupting traffic.
+
+### Added
+
+- **`POST /admin/resume`** — clears halt state; idempotent. Returns `{ok, wasHalted, resumedAt}`. `GET /admin/resume` is the read-only state query.
+- **`dario resume`** CLI command — POSTs to `/admin/resume` on the local proxy. Friendly hint when no proxy is running.
+- **`src/overage-guard.ts`** — `OverageGuard` class with `attach(analytics)`, `clear(reason)`, `state()`, `isHalted()`, `destroy()`. EventEmitter mixin emits `'halt'`, `'warn'`, `'resume'`.
+- **`src/notify.ts`** — cross-platform native notification dispatcher. Pure Node, no new deps; silent failure when the native path is unavailable.
+
+### Internal
+
+- **Three new test files**, ~250 LOC total — `overage-guard.mjs` (detection, halt-once, manual resume, cooldown resume, warn mode, disabled mode, error-body shape, notifier hook), `overage-guard-config.mjs` (defaults, mergeOver siblings, sanitize type rejection), `notify.mjs` (BEL emission, captureNotifier, hostile-input safety). Default suite: 71 → **74**.
+- **Zero new runtime dependencies.**
+
+### Linked issues
+
+- Closes dario#288.
+
+## [4.0.1] - 2026-05-16
+
+### Fixed — CC v2.1.143 support (drift patch)
+
+- `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.142` → `2.1.143`. Users on CC v2.1.143 no longer see the soft `untested-above` warning from `dario doctor`.
+- Re-baked `src/cc-template-data.json` from a live CC v2.1.143 capture. Diff vs. the v2.1.142-baked template:
+  - **Tools 29 → 30** — `ShareOnboardingGuide` added (a benign new CC feature for sharing local `ONBOARDING.md` guides). No translation entry needed in `TOOL_MAP` because no third-party client maps to it.
+  - **System prompt +432 chars** — one new behavioral paragraph instructing CC to grep before asking a clarifying question. No behavioral effect on dario users because live capture replaces the baked snapshot at startup whenever CC is installed.
+  - **Headers** — `user-agent` is the only diff (`claude-cli/2.1.142 → claude-cli/2.1.143`); replaced at runtime per user's live capture.
+  - **Beta flags, body field order, header order, agent identity, schema version** — all identical.
+- No restrictions, no wire-shape changes, no removed fields. This is the cleanest CC release on the wire since v2.1.139.
+
+Drift detected by [`cc-drift-watch.yml`](./.github/workflows/cc-drift-watch.yml) at `2026-05-15T22:56:25Z` ([issue #279](https://github.com/askalf/dario/issues/279)). Original auto-drafted PR #280 hit the wrong version path (would have downgraded `4.0.0 → 3.38.7`) and is superseded by this entry.
+
+## [4.0.0] - 2026-05-16
+
+### Major — interactive TUI is now the default surface
+
+`dario` invoked with no arguments now opens an interactive terminal UI. The TUI is the new way to configure dario, watch token analytics, and inspect live requests — replacing the v3 pattern of hand-editing shell scripts and reading help text to find the right `--flag`.
+
+```
+┌─ dario v4.0.0 ─────────────[ q quit · ? help · Tab next panel ]─┐
+│  Status   Config   ▎Analytics▎   Hits   Accounts   Backends    │
+├─────────────────────────────────────────────────────────────────┤
+│  Analytics — last 60 min                                        │
+│                                                                 │
+│  Requests:        247  (4.1/min)                                │
+│  Tokens in:    142,830                                          │
+│  Tokens out:    38,200                                          │
+│                                                                 │
+│  Per-model:                                                     │
+│   opus-4-7    ████████████████████░  72%                        │
+│   sonnet-4-6  █████░░░░░░░░░░░░░░░░  22%                        │
+│   haiku-4-5   █░░░░░░░░░░░░░░░░░░░░   6%                        │
+│                                                                 │
+│  Rate-limit:                                                    │
+│   5h ████░░░░░░░░░░░░░░░░░░░░░░  18%                            │
+│   7d ██░░░░░░░░░░░░░░░░░░░░░░░░   8%                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Six tabs**:
+- **Status** — proxy health, OAuth expiry, config source
+- **Config** — edit `~/.dario/config.json` (port, host, stealth, pacing, think-time, session-start); bool toggles in place, number/string opens an inline prompt; save / discard / reload
+- **Analytics** — rolling-window summary, per-model + rate-limit bars, billing-bucket breakdown; auto-refreshes every 2s
+- **Hits** — live SSE stream of every request as it lands; arrow keys navigate, detail pane shows full per-record fields
+- **Accounts** — pool listing with OAuth expiry; mutations still via CLI (commands in the footer)
+- **Backends** — OpenAI-compat backends; same shape
+
+**Zero new runtime dependencies.** ~2700 LOC of pure-ANSI rendering, raw-stdin key parsing, layout helpers, and tab state machines — no `blessed`, no `ink`, no React. The dario zero-deps stance survives v4.
+
+### Breaking change — `dario` (no args) opens TUI instead of starting proxy
+
+| | v3.x | v4.0 |
+|---|---|---|
+| `dario` | starts proxy server | opens TUI |
+| `dario proxy` | starts proxy server | starts proxy server (unchanged) |
+| `dario --no-tui` | (didn't exist) | falls back to help (escape hatch) |
+
+Scripts that ran bare `dario` to launch the proxy need to switch to `dario proxy`. The TUI surfaces `"proxy unreachable — start it with dario proxy"` if it can't reach localhost:3456, so users falling into the old habit get pointed at the fix immediately.
+
+See [MIGRATION.md](./MIGRATION.md) for the full migration playbook.
+
+### New — persistent config file
+
+`~/.dario/config.json` holds settings the TUI's Config tab edits. The proxy reads it at startup; precedence is `CLI flag > env var > config file > built-in default`. Existing `--flag` and `DARIO_*` env vars still win — the file is purely additive.
+
+Fields covered in v4.0:
+- `port`, `host`
+- `stealth`, `drainOnClose`
+- `pacing.{minMs, jitterMs}`
+- `thinkTime.{baseMs, perTokenMs, jitterMs, maxMs}`
+- `sessionStart.{minMs, jitterMs}`
+
+Other settings (`preserveTools`, `hybridTools`, queue limits) still come from flag/env only. v4.x can extend the Config tab + file schema to more fields without API change.
+
+### New — `/analytics/stream` SSE endpoint
+
+The proxy now exposes Server-Sent Events at `GET /analytics/stream`. One event per request as it's appended to the analytics rolling window — backlog of 50 recent records on connect, then live tail. Drives the TUI's Hits tab, but also usable directly: `curl -N http://localhost:3456/analytics/stream`.
+
+### Changed — analytics is always-on (previously pool-mode only)
+
+Pre-v4 the `/analytics` endpoint was gated to multi-account pool mode and returned `{mode:'single-account', note:'…'}` for the >99% of users on single-account. The note is gone; every install gets the full rolling-window summary now. The four record sites in the proxy hot path work in both modes — `account` defaults to a synthetic single-account key when there's no `poolAccount`, rate-limit snapshot falls back to `parseRateLimits(upstream.headers)`.
+
+### Internal — release pipeline fixes (from the v3.38.x backlog, all live before v4.0)
+
+Three meaningful pipeline improvements landed during the v3.38.x sprint and ride into v4:
+
+- **CHANGELOG-extraction regex fix** (#276 + #277): every auto-released GitHub release body since v3.31.12 had been shipping empty because the `/m`-flag regex captured the empty string after every version's blank-separator line. Fixed + extracted to `scripts/extract-release-notes.mjs` with 30 unit tests. All 39 affected historical releases (v3.31.12 through v3.38.4) had their bodies backfilled.
+- **Adaptive-thinking per-model gate** (#273): live-probed `thinking:{type:"adaptive"}` is server-side-gated to Opus/Sonnet 4.6+; dario was unconditionally emitting it for every non-Haiku model, 400ing Sonnet 4-5 / Opus 4-5 requests. New `supportsAdaptiveThinking()` allow-list with empirical matrix locked into tests.
+- **TodoWrite legacy mapping drop** (#274): CC v2.1.142 dropped `TodoWrite`/`TodoRead` for the Task* family; the dario `todo_*` → `TodoWrite` mapping pointed at a destination that no longer exists. Dropped both mappings + routed legacy clients through the unmapped-tool path.
+
+### Tests
+
+Suite: 64 → 71 passing across the v4 cycle. New test files:
+
+- `test/config-file.mjs` — 59 assertions
+- `test/analytics-stream.mjs` — 25 assertions
+- `test/tui-render.mjs` — 55 assertions
+- `test/tui-input.mjs` — 47 assertions
+- `test/tui-layout.mjs` — 35 assertions
+- `test/tui-tabs.mjs` — 86 assertions
+- `test/tui-app-wiring.mjs` — 1 assertion (smoke)
+
+Total v4 contribution: ~308 new assertions. The interactive App lifecycle (real TTY, stdin raw mode, alt-screen) isn't covered by automated tests — manual e2e confirms it on Linux + macOS + Windows Terminal.
+
+## [3.38.6] - 2026-05-15
+
+### Fixed — drop legacy `todo_read`/`todo_write` → `TodoWrite` mapping (CC v2.1.142 deprecation)
+
+CC v2.1.142 removed the `TodoWrite` / `TodoRead` tools from its catalog in favor of the Task* family (`TaskCreate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop`, `TaskUpdate`). dario's TOOL_MAP entries for `todo_read` and `todo_write` still pointed at `TodoWrite` — a destination that no longer exists in the bundled or live template — so `test/tool-schema-contract.mjs` had been failing 2/127 since the v2.1.142 re-bake.
+
+The mappings are dropped, not re-pointed. Re-mapping to a Task* member would silently lose semantics: `TodoWrite` replaced an entire flat list per call; `TaskCreate` / `TaskUpdate` operate on individual tasks by ID. A `todo_write` → `TaskCreate` rewrite would truncate a list-write to creating only the first item.
+
+Legacy clients now fall through to the existing unmapped-tool path (same shape as the v3.18.0 `message` / `ask_followup_question` / `clarify` / `notebook_read` drops):
+
+  - default mode → round-robin to a fallback CC tool (lossy but the upstream accepts);
+  - hybrid mode → dropped, so the model doesn't see a phantom tool;
+  - `--preserve-tools` → client's real schema flows through untouched (recommended for clients that actually depend on todo semantics).
+
+`test/tool-schema-contract.mjs` now adds `todo_read` / `todo_write` to `INTENTIONALLY_UNMAPPED` with the rationale inline. Full suite: 63/63 passing (first fully-green run since the v2.1.142 re-bake in #271 — v3.38.5 shipped at 62/63, this closes the held-back failure).
+
+This release rides on top of v3.38.5 because the auto-release fired on #273's merge before #274 (the TodoWrite drop) landed.
+
+## [3.38.5] - 2026-05-15
+
+### Fixed — adaptive-thinking gated per-model; older 4-5 Sonnet/Opus no longer 400s
+
+Live-probe diagnosis (2026-05-15) found that `thinking: { type: "adaptive" }` is gated per-model server-side on OAuth subscription auth. The split is at the 4.6 generation:
+
+| Model | `thinking:{adaptive}` |
+|---|---|
+| `claude-opus-4-7` | ✓ 200 |
+| `claude-opus-4-6` | ✓ 200 |
+| `claude-sonnet-4-6` | ✓ 200 |
+| `claude-opus-4-5` | ✗ 400 `"adaptive thinking is not supported on this model"` |
+| `claude-sonnet-4-5` | ✗ 400 same |
+
+Beta header state (full v2.1.142 set vs. minimal `oauth+claude-code`) does not change the outcome — adaptive is gated on the model, not on a beta flag. The same holds for the dependent `context_management.edits.clear_thinking_*` body field: the API rejects it without an enabled `thinking` field, so the two ride together.
+
+Before this release, dario's body builder unconditionally emitted `thinking:{type:"adaptive"}` for every non-Haiku model. In normal mode that meant **every Sonnet 4-5 / Opus 4-5 request through dario 400'd at the API**. Users on the codebase's default Sonnet 4-6 / Opus 4-7 path were unaffected; users explicitly targeting an older 4-5 model were broken.
+
+Fix: a new exported helper `supportsAdaptiveThinking(modelId)` allow-lists models verified to accept the field (Opus/Sonnet 4-6+, plus future 5+ majors). Default is deny — when a future model ships unrecognized, dario silently omits `thinking` (always accepted by the API) rather than 400-then-retry. Both `thinking` and `context_management` are gated together; `output_config.effort` is independent and ships unchanged for all non-Haiku.
+
+Sample matrix locked into `test/adaptive-thinking-gate.mjs`:
+- 37 unit assertions covering the empirical YES/NO sets plus forward-compat patterns (Opus 4.8/4.10/4.99, Opus/Sonnet 5+, Opus 10) and default-deny on nonsense inputs.
+- Bounded digit groups in the regex (`\d{1,2}`) so the pre-4.x `claude-3-5-sonnet-20241022` / `claude-3-7-sonnet-20250219` shape can't false-positive by parsing the date suffix as the major.
+
+`test/template-invariants.mjs` extended with a 4-5 generation block asserting `thinking` and `context_management` are absent for those models while `output_config` is still present.
+
+This is a wire-shape correction, no behavior change for the codebase-default Sonnet 4-6 / Opus 4-7 path.
+
+## [3.38.4] - 2026-05-15
+
+### Changed — `SUPPORTED_CC_RANGE.maxTested` bumped to v2.1.142 (#272, closes #269)
+
+The automated drift watcher opened #269 when CC v2.1.142 hit npm. Item 2 (bundled template stale) was resolved in v3.38.3 (#271, re-bake). This release closes item 1: `maxTested` was still v2.1.141, so v2.1.142 users got a soft `[WARN] ... untested` line from `dario doctor`.
+
+`maxTested` is not a version formality — it asserts the release was actually exercised against that CC. That's now true for v2.1.142: full e2e suite green 12/12 against a live v2.1.142 capture, plus a 24-case context-1m / context_management interaction matrix against v2.1.142's wire shape on live OAuth. The matrix confirmed the v3.38.3 re-baked beta set is what the API currently accepts — the old v2.1.141 set carried `context-1m-2025-08-07`, which the API now **categorically rejects on OAuth subscription auth** (`400 — "This authentication style is incompatible with the long context beta header."`), independent of model or request shape.
+
+Effect: `dario doctor` on a v2.1.142 install moves from a `[WARN] ... untested` line to a clean in-range report. No proxy-path behaviour change — this constant only drives the doctor advisory and the `compat.range` drift signal.
+
+## [3.38.3] - 2026-05-14
+
+### Fixed — bundled template re-baked from CC v2.1.142, drops stale `context-1m-2025-08-07` beta (#271)
+
+New users installing dario without Claude Code on their machine fall back to the bundled template snapshot (`src/cc-template-data.json`), because the live-fingerprint extractor needs an installed CC binary to capture from. On v3.38.x the bundled snapshot was baked from CC v2.1.141, and CC's `anthropic-beta` header set drifted since.
+
+Delta vs v2.1.141 snapshot:
+
+| Field | v2.1.141 | v2.1.142 |
+|---|---|---|
+| `tools` | 26 | 29 (3 new platform tools) |
+| `system_prompt` chars | 12968 | 12937 (minor wording revisions) |
+| `anthropic_beta` | includes `context-1m-2025-08-07` | drops it |
+
+`context-1m-2025-08-07` is the long-context beta Anthropic added for the 1M-context Sonnet/Opus rollout. It now requires Extra Usage billing for OAuth-bearer requests; bare-subscription calls with the flag set get a 400 *"This authentication style is incompatible with the long context beta header"* on the Haiku path.
+
+The v3.37.20 (#266) per-account auto-retry already handles this — strips both `context-1m-2025-08-07` and `context-management-2025-06-27` on the long-context-error pattern, caches the rejection so subsequent requests on that account skip both flags. So bundled-template users on v3.38.0–v3.38.2 saw correct behaviour after a one-time per-account 400 round-trip, then cached. This release eliminates that round-trip by aligning the bundled snapshot with what CC v2.1.142 actually sends.
+
+No code paths change. The auto-retry stays as defense-in-depth for future Anthropic-side beta deprecations (and for users on live capture whose extracted template happens to still include a deprecated flag).
+
+### Why bake instead of strip-in-code
+
+Stripping the flag in code would diverge the bundled template from "what the installed CC actually sends." The wire-fidelity story since v3.22 has been: dario sends the same shape CC sends. Anthropic removed the flag from CC v2.1.142's wire set; dario's bundled fallback should mirror that. A static strip would also be a maintenance burden — the next flag to be added or removed needs the same hand-fix, where re-bake from a real CC binary picks up the new wire shape for free.
+
+## [3.38.2] - 2026-05-14
+
+### Added — `--stealth` preset (#268)
+
+v3.38.0 shipped six knobs for behavioral pacing (think-time + session-start jitter), all defaulting to 0 = off. The feature existed but nobody was going to tune six numbers. `--stealth` flips each resolver's zero-default to a non-zero preset sized for real-CC inter-arrival statistics, all in one flag.
+
+| Knob | v3.38.1 default | Under `--stealth` |
+|---|---|---|
+| `--pace-jitter` | 0 | 300 |
+| `--think-time-base` | 0 | 800 |
+| `--think-time-per-token` | 0 | 4 |
+| `--think-time-jitter` | 0 | 1500 |
+| `--think-time-max` | 30000 | 25000 |
+| `--session-start-min` | 0 | 1200 |
+| `--session-start-jitter` | 0 | 3000 |
+
+Per-knob explicit flags and env vars still win over the stealth default — workflow is *flip stealth on, tune any axis afterwards*. Env mirror: `DARIO_STEALTH=1`. No behavior change when omitted or false — every default stays at zero.
+
+## [3.38.1] - 2026-05-14
+
+### Fixed — CodeQL `js/clear-text-logging` false positive on the "already running" banner
+
+The port-conflict banner shipped in v3.37.20 (#266) logs the `oauth` field from `/health`. That field is a status enum (`'healthy' | 'expired' | 'broken' | 'none' | 'degraded'`) — not a token, not a credential. CodeQL's `js/clear-text-logging` heuristic flags any logged field whose key contains "oauth" regardless of value, so the v3.38.0 release triggered a security alert at the repo level.
+
+Replaced the direct `body.oauth` interpolation with an allow-list filter: only the known status enum values are passed through; anything else (including a hypothetical malicious `/health` impersonator returning a real token in the field) is reported as `unknown`. The fix is defense-in-depth — `/health` is on `127.0.0.1` by default and the route handler never reads tokens into the response — but it eliminates the heuristic alert at source.
+
+No runtime behavior change for legitimate dario instances. The status string shown to operators is identical to v3.37.20–v3.38.0.
+
+## [3.38.0] - 2026-05-14
+
+### Added — response-correlated think time + session-start jitter (#267)
+
+Closes the behavioral/temporal axis the wire-fidelity work doesn't touch. Existing inter-request pacing (`--pace-min`, `--pace-jitter`) enforces a floor on wall-clock distance between requests but doesn't model two patterns present in real interactive CC sessions and absent in machine-paced agent loops:
+
+1. **Post-response read time correlated with response length.** Real users read the response before sending the next message; long responses → longer pauses. Agent loops fire the next request as soon as the client can stamp one out — a detectable inter-arrival distribution.
+2. **Session-start latency.** Every new session-id (single-account rotation, first startup) previously fired the first request at machine speed (`lastRequestTime=0` short-circuited pacing). Every session opened identically — a long-run statistical signal. Real CC users open a session by opening the binary and typing — seconds of latency, not microseconds.
+
+Six new opt-in knobs (all default 0 = off, v3.37.20 behaviour preserved exactly):
+
+| Flag | Env | Default |
+|---|---|---|
+| `--think-time-base=MS` | `DARIO_THINK_TIME_BASE_MS` | 0 |
+| `--think-time-per-token=MS` | `DARIO_THINK_TIME_PER_TOKEN_MS` | 0 |
+| `--think-time-jitter=MS` | `DARIO_THINK_TIME_JITTER_MS` | 0 |
+| `--think-time-max=MS` | `DARIO_THINK_TIME_MAX_MS` | 30000 |
+| `--session-start-min=MS` | `DARIO_SESSION_START_MIN_MS` | 0 |
+| `--session-start-jitter=MS` | `DARIO_SESSION_START_JITTER_MS` | 0 |
+
+`think_time_delay = base + perToken * lastResponseTokens + U(0, jitter)`, clamped to `max`. Stamped only on 2xx responses so error responses don't pin the next request's delay to `base` needlessly. All three pacing layers (pace, think, session-start) combine with `Math.max` — each enforces an independent floor.
+
+Pure delay calculators live in `src/pacing.ts`, deterministic over `(now, state, cfg, rng)`. 70 unit tests cover short-circuits, base only, perToken scaling, max cap, jitter via injected rng, env precedence, and explicit override precedence.
+
+### Fixed — TS flow narrowing on `upstreamAbortReason`
+
+Widens the declaration via `as UpstreamAbortReason` cast so TS flow narrowing from the synchronous `sse_overflow` assignment in the streaming branch doesn't shadow the callback-based `timeout` / `client_closed` assignments at the catch site. Uncovered when the new pacing code paths shifted line numbers; was latently incorrect in earlier releases.
+
+## [3.37.20] - 2026-05-14
+
+### Fixed — `dario login` / `dario proxy` no longer crashes when already running (#266)
+
+When port 3456 is already in use, dario now probes `/health` before erroring. If dario itself is already on that port, it prints the "already running" banner (OAuth status + usage env vars) and exits 0. Running `dario login` twice in a row — common during first setup — is now a no-op instead of a crash. If the port belongs to a different process, the error message now includes a `kill $(lsof -ti:<port>)` hint.
+
+### Fixed — Haiku 400 on long-context betas with OAuth (#266)
+
+The `isLongContextError` retry previously stripped only `context-1m-2025-08-07`. On models that also reject `context-management-2025-06-27` with OAuth subscription auth (e.g. Haiku), the retry re-sent `context-management` and got a second 400 forwarded to the client. Both long-context betas are now stripped together on retry. All 12 e2e tests pass including Haiku non-stream.
+
+## [3.37.19] - 2026-05-14
+
+### Fixed — `dario doctor --usage` works when proxy auth is configured (#264)
+
+Probe construction now reads `DARIO_API_KEY` from env when authorizing against the local proxy. Previously the probe hard-coded `Authorization: Bearer dario`, so any deploy that set a real `DARIO_API_KEY` (every non-loopback bind per the README's documented security guidance) got 401 on every probe and the doctor reported `[WARN] Usage snapshot probe failed: all probe requests failed`.
+
+That command is the first thing `docs/why-now-2026-06.md` recommends migrating users run as a diagnostic. The WARN made dario look broken at exactly the wrong moment — first impression for users coming from competing proxies after 2026-06-15.
+
+Falls back to literal `dario` when `DARIO_API_KEY` is unset so local-dev probes against a no-auth proxy still work. The direct-to-Anthropic fallback path (when proxy isn't running) was unaffected.
+
+### CI — cap_drop ALL smoke test (#263)
+
+Adds a `docker-cap-drop-smoke` job to `.github/workflows/ci.yml` that builds the image from the PR's Dockerfile (single-arch, GHA-cached) and runs three smoke tests under `--cap-drop=ALL --security-opt=no-new-privileges:true`:
+
+1. `dario --help` — non-empty command-list output
+2. `dario doctor` — entrypoint successfully exec's the CLI
+3. `dario proxy` — proxy boots without restart-looping; defensive grep for the exact error strings v3.37.16 (`chown: ... Permission denied`) and v3.37.17 (`su-exec: setgroups: Operation not permitted`) emitted during their respective regressions
+
+~46s per CI run, GHA cache keeps subsequent runs fast. Complements the existing post-publish `--help` smoke from RELEASING.md (which catches dario#143 silent-CLI) — pre-release gate now covers both classes.
+
+## [3.37.18] - 2026-05-14
+
+### Fixed — restore `USER dario` default for cap_drop deploys (regression in v3.37.16 + v3.37.17)
+
+**Both v3.37.16 and v3.37.17 break container startup under `cap_drop: ALL`.** v3.37.16 failed on `chown` (no CAP_CHOWN); v3.37.17 fixed the chown to be conditional but still failed on `su-exec: setgroups: Operation not permitted` (privilege-drop requires CAP_SETGID/CAP_SETUID, also gone under `cap_drop: ALL`). The fundamental issue: any privilege-drop pathway needs caps that the hardened config strips.
+
+Fix: restore `USER dario` as the default in the Dockerfile. The entrypoint script is still present and still does self-heal when explicitly invoked as root, but that's now an opt-in operation rather than the default startup flow.
+
+What this means concretely:
+
+- **Default deploy (`USER` not overridden, any compose hardening including `cap_drop: ALL`):** container starts as the dario user. Entrypoint's `id -u != 0` branch exec's the CLI directly. No chown, no su-exec, no caps required. Works.
+- **Recovery deploy (`docker run --user 0 ...` + `cap_add: [CHOWN, SETUID, SETGID, FOWNER]` for one boot):** entrypoint chowns the volume, su-exec's down to dario, normal operation. Operator can then drop caps again on subsequent boots.
+- **Recovery deploy without re-adding caps:** entrypoint logs warnings about missing capabilities and gracefully degrades. Subsequent writes may EACCES but the container itself starts.
+
+The original automatic-self-heal-on-every-start design from v3.37.16 was incompatible with `cap_drop: ALL` because that pattern requires either (a) staying as root (which dario shouldn't) or (b) privilege-dropping via su-exec (which needs caps the hardened config drops). The current design preserves the security default for everyone, and makes self-heal an explicit operator action for the recovery case.
+
+Anyone on v3.37.16 or v3.37.17 with cap-dropped containers needs to upgrade.
+
+## [3.37.17] - 2026-05-14
+
+### Fixed — entrypoint hotfix for cap_drop deploys (regression in v3.37.16)
+
+**v3.37.16 broke container startup for any deploy that runs with `cap_drop: ALL` (a common hardening pattern in docker-compose configurations).** Anyone on v3.37.16 with a cap-dropped container saw an infinite restart loop with `chown: /home/dario/.dario: Permission denied` in the logs — please upgrade to v3.37.17.
+
+Root cause: the v3.37.16 self-heal entrypoint (#259) ran `chown -R dario:dario /home/dario/.dario` unconditionally at startup. Under `cap_drop: ALL`, the container is root but has no `CAP_CHOWN`, so the chown EPERMs and the entrypoint exits before su-exec can hand off to the dario user.
+
+Fix: make the chown conditional. The entrypoint now skips it entirely when the volume is already correctly owned (the normal case — every container start after the first), and degrades gracefully with a clear log message when chown is needed but unavailable. Net effect on the three deploy scenarios:
+
+- **Normal start (volume already dario-owned, any caps):** no chown attempted. Works under `cap_drop: ALL`.
+- **Recovery start (volume root-owned from a `--user 0` op) + caps available:** chown succeeds, volume is healed, log line confirms it.
+- **Recovery start + `cap_drop: ALL`:** chown fails, container still starts, log line explains how to recover (one boot with `cap_add: [CHOWN, FOWNER]`, then drop caps again).
+
+The mkdir at the start of the entrypoint is also now best-effort (`|| true`) for the same defensive reason.
+
+## [3.37.16] - 2026-05-14
+
+### Documentation — 2026-06-15 Anthropic plan-change positioning (#255, #256, #257)
+
+Adds an explicit README section ("What changes 2026-06-15 (and why dario doesn't)") plus README + `docs/faq.md` FAQ entries explaining how dario's wire-fidelity replay design predates the upstream change and continues routing requests through the interactive Claude Code subscription pool regardless of whether the originating local tool was `claude -p`, the Claude Agent SDK, Cline, Aider, or anything else. Also adds a stand-alone deep doc at `docs/why-now-2026-06.md` that the README's new section links to — full mechanism explanation plus two diagnostic checks (rate-limit-header comparison + `dario doctor` sanity check) users can run after 2026-06-15 lands to verify their wire path is still classified as interactive subscription billing on their own setup.
+
+Background: starting 2026-06-15, Anthropic moves `claude -p` and Claude Agent SDK usage to a separate fixed monthly credit pool ($20 Pro / $100 Max 5x / $200 Max 20x), then per-token API pricing once exhausted. Proxies that forward those request shapes through unchanged will see their users' agentic traffic land in the smaller credit bucket. Dario's Claude backend has always rewritten outbound requests to look like interactive Claude Code (headers, body key order, TLS stack, session-id lifecycle) — this is what the wire-fidelity work in `docs/wire-fidelity.md` exists to do. No code changes were needed for the transition; the docs just make the structural advantage explicit.
+
+### Fixed — `dario doctor` no longer shows misleading WARNs on container deploys (#258)
+
+Two diagnostics in `dario doctor` were marked `[WARN]` when the underlying state was actually fine, which scared new users on containerized deploys into thinking the install was broken:
+
+- **`dario` version row**: `package.json` is now copied into the runtime image so doctor can read the version. Previously container deploys saw `[WARN] dario  package.json not readable — version unknown` while the binary itself worked correctly.
+- **`CC binary` row**: not having a local `claude-code` install is the correct state for containerized deploys and CI runners — dario uses the bundled scrubbed template (whose freshness is surfaced by the separate "Template" row). Downgraded the row from `[WARN]` to `[INFO]` with a message that explains both the current state and the upside of installing CC locally (auto-refresh from your own binary).
+
+Net effect: the standard containerized `dario doctor` report is green-and-blue-only after this release (assuming OAuth + template are themselves healthy).
+
+### Fixed — Docker self-heal entrypoint recovers volume ownership automatically (#259)
+
+Adds `docker-entrypoint.sh` that runs as root briefly at container start, chowns `/home/dario/.dario` to `dario:dario`, then drops privileges via `su-exec` before exec'ing the CLI. Without this, any prior `docker run --user 0 ...` recovery op (the documented incantation for wiping a broken credentials file before `--force-reauth` shipped in v3.37.11) leaves the config volume root-owned. Subsequent normal-user container starts then see EACCES on every write — the dario user can't refresh credentials, can't persist a new login, and the container drifts into a state that *presents* as an OAuth bug (refresh failing, /health going degraded) but is actually a filesystem ownership issue.
+
+Operators who run `docker run --user dario ...` opt out of the self-heal and the entrypoint respects that (script detects non-root and exec's directly without chowning). Adds the alpine `su-exec` package (~10KB, no shell, no PAM).
+
+## [3.37.15] - 2026-05-14
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.140` → `2.1.141` for CC v2.1.141. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.14] - 2026-05-12
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.139` → `2.1.140` for CC v2.1.140. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.13] - 2026-05-11
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.138` → `2.1.139` for CC v2.1.139. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.10] - 2026-05-09
+
+Community contribution from [@Saik0s](https://github.com/Saik0s) — thank you. (#222)
+
+### Changed — `opus` shortcut now resolves to `claude-opus-4-7`
+
+The `opus` and `opus1m` aliases now route to `claude-opus-4-7` and `claude-opus-4-7[1m]` respectively, matching what most users mean when they ask for "opus" today. Anyone who specifically wants to pin to claude-opus-4-6 can now use the new `opus46` alias as a legacy escape hatch — both versions remain available, the default just shifted to current.
+
+`/v1/models` lists `claude-opus-4-7` first, ahead of `claude-opus-4-6`.
+
+`sonnet`, `haiku`, `sonnet1m` are unchanged.
+
+### Changed — `Access-Control-Allow-Headers: *, Authorization`
+
+CORS preflight now responds with the wildcard `*` for custom request headers, with `Authorization` listed explicitly. Per the Fetch spec, `*` covers any custom header in non-credentialed mode but does NOT cover the "CORS non-wildcard request-header names" set, which currently has exactly one member: `Authorization`. Listing it explicitly alongside the wildcard is the correct shape for browser-based clients that want to send custom headers without each one needing to be enumerated in the dario response.
+
+The change unblocks browser-side clients that need to send headers like `x-app-name` or `x-trace-id` through dario without dario having to know about each one in advance.
+
+## [3.37.9] - 2026-05-09
+
+A reliability + UX cycle on top of the routine drift catch-up. Five changes from a live Max+Pro pool-mode e2e session:
+
+### Fixed — pool selector skips accounts in auth-failure cool-down (#234)
+
+`AccountPool.select()` previously routed by headroom only. 401/403 responses don't include rate-limit headers, so a server-invalidated account looked identical to a healthy idle one to the selector — every request continued to route at the dead account until rate-limit data eventually moved (which it can't, because there's no traffic landing on a dead account that succeeds).
+
+Reproed live: 2-account pool with one stale-token account, sent 3 requests, all 3 routed to the dead account, peer never tried.
+
+Fix: per-account auth-failure cool-down on `PoolAccount` (60s base, exponential backoff capped at 30 min). New methods `markAuthFailure` / `clearAuthFailure`. `select()` / `selectExcluding()` / `selectSticky()` / `status()` all skip cool-down'd accounts. Proxy response handler marks on 401/403, attempts in-request failover (mirroring the existing 429 path), and clears on 2xx success. Surfaces in `/accounts` as `status: "auth-cooldown"` with `cooldownMs` and `consecutiveAuthFailures` fields. 27 new unit tests.
+
+### Fixed — pool's back-filled `login` snapshot auto-resyncs at startup (#235)
+
+The single-account path keeps refreshing `~/.dario/credentials.json` independently. Each refresh issues new tokens; Anthropic invalidates the previous refresh_token. The pool's `accounts/login.json` snapshot — frozen at back-fill time — is now wrong on both fields, but its `expiresAt` metadata still says "healthy" so the selector keeps picking it.
+
+Fix: at proxy startup, before loading the pool, `resyncLoginFromCredentialsIfStale()` compares `accounts/login.json` against the current `credentials.json` and overwrites the snapshot when they diverge — preserving the pool-internal `deviceId` / `accountUuid`, rotating just the OAuth tokens. Idempotent on repeated invocation. Logs `[dario] re-synced pool \`login\` account from current credentials.json (was stale; dario#235)` when a resync runs. 17 new unit tests.
+
+### Fixed — Windows URL dispatch preserves OAuth query parameters
+
+`explorer.exe URL` re-shells the URL through the registered browser's command-line template in some Windows configurations. Any `&` past the first one gets re-parsed as a cmd separator, so a long OAuth URL with 7+ query parameters loses its trailing params (typically `state=...`), and the upstream returns `Invalid OAuth Request — Missing state parameter`.
+
+Switched the win32 path from `explorer.exe URL` to `rundll32 url.dll,FileProtocolHandler URL` — Microsoft's documented Win32 entry point for "open URL with default handler". System32 binary, invokes the DLL function directly with the URL as a single in-process string, no command-line re-parsing through the registered handler's template. macOS / Linux paths unchanged.
+
+### Added — `dario accounts add --manual` / `--headless` flag
+
+`--manual` has been documented and working for `dario login` since v3.31.x but `dario accounts add` silently ignored it. With the rundll32 fix above, the auto-callback flow works on Windows; `--manual` is the escape hatch for SSH / container / no-browser-on-this-machine setups, and as a fallback when URL dispatch can't be relied on.
+
+New `addAccountViaManualOAuth(alias)` in `accounts.ts` mirrors `startManualOAuthFlow` from `oauth.ts`. The `accounts add` CLI handler routes through it when the flag is present. Help text updated. `readLineFromStdin` is now exported from `oauth.ts` so `accounts.ts` reuses the prompt without duplicating it.
+
+### Added — UX parity between `dario login` and `dario accounts add`
+
+Two small UX touches that existed on `dario login` but not on `accounts add`, even after the `--manual` wiring above:
+
+- **Headless-environment hint before launching the browser.** `detectHeadlessEnvironment()` already returned a reason string when SSH / container / no-DISPLAY was detected. `dario login` printed a one-line note suggesting `--manual`; `accounts add` silently opened the browser. Now both flows print the same hint.
+- **Targeted callback-failure error hint.** `dario login` matches `/callback server|EADDRINUSE|bind|timed out/` against the error message and suggests `--manual` when the auto flow fails. `accounts add` mirrored the same regex (plus `did not receive` for OAuth-response-without-code).
+
+### Maintenance — CC drift catch-up (v2.1.137 + v2.1.138)
+
+Anthropic shipped two CC patch versions in a single day (v2.1.137 and v2.1.138). Both surfaced via `cc-drift-watch.yml`; this release subsumes both drift PRs (#229 → v2.1.137, #231 → v2.1.138) into one bump targeting the latest.
+
+- `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.136` → `2.1.138`.
+- Bundled `src/cc-template-data.json` re-captured against CC v2.1.138. Substantive content unchanged (27 → 27 tools, system_prompt diff is gitStatus-header capture variance only — no tool definition or behavioral instruction moved).
+- `user-agent` claude-cli/2.1.136 → 2.1.138. CC's bundled `@anthropic-ai/sdk` `x-stainless-package-version` stayed at 0.93.0 across both v2.1.137 and v2.1.138, so no SDK shift this cycle.
+
+The wire is still locked across the v2.1.13x line — three patch releases (133 → 136 → 138) and zero functional changes to the captured agent shape.
+
+### Tests
+
+`npm test` count: 60 → 62 (+2 new test files: `test/pool-auth-cooldown.mjs` 27 assertions, `test/resync-login-stale.mjs` 17 assertions). `test/open-browser.mjs` updated for the rundll32 argv shape (22 → 30 assertions). All green.
+
+Closes #234, #235. Subsumes #229, #231 (drift bot PRs).
+
+## [3.37.8] - 2026-05-08
+
+### Changed — pool-mode visibility on every proxy startup
+
+`dario proxy` now prints a `Pool:` line in the startup banner alongside `OAuth:` and `Model:`. Previously this line was only emitted when pool mode was already active, so the multi-account feature was effectively invisible to single-account users — the path most users start on.
+
+Single-account banner now reads:
+
+```
+  Pool: single-account (run `dario accounts add <alias>` to pool multiple subscriptions)
+```
+
+Pool-mode banner reads:
+
+```
+  Pool: 2 accounts loaded — headroom-routed, sticky for multi-turn
+```
+
+The earlier pre-banner `Pool mode: N accounts loaded` log line is dropped — the new formatted banner line subsumes it.
+
+`dario doctor` got the symmetric treatment: the single-account `[INFO] Pool` line now inlines the `dario accounts add <alias>` call-to-action instead of just stating "no pool configured".
+
+No behavioral change. Pool routing, headroom selection, sticky bindings, in-flight 429 failover, the migration-on-first-add path — all unchanged. This is purely surfacing the feature in two of the highest-traffic places (proxy startup + doctor) so single-account users discover it without having to dig into `dario --help` or the README.
+
+### Maintenance — CC drift bump (subsumes drift bot's auto-PR for v2.1.136)
+
+- `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.133` → `2.1.136`.
+- Bundled `src/cc-template-data.json` re-captured against CC v2.1.136. Substantive content unchanged: 27 → 27 tools, system_prompt diff is gitStatus-header capture variance only (different branch + commit list in the maintainer's local checkout at capture time), no tool definition or behavioral instruction changed.
+- `user-agent` claude-cli/2.1.133 → 2.1.136 and CC's bundled `@anthropic-ai/sdk` `x-stainless-package-version` 0.81.0 → 0.93.0 — both reflected in the re-bake so the wire-shape stays exact-match against current CC.
+
+## [3.37.7] - 2026-05-07
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.132` → `2.1.133` for CC v2.1.133. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.6] - 2026-05-07
+
+### Added — supply-chain attestation on the GHCR image
+
+The Docker image now ships with provenance + SBOM manifests attached, matching what `npm publish --provenance` already does for the npm package. The `docker/build-push-action` invocation in both `cc-drift-auto-release.yml` and `docker-publish.yml` gained `provenance: true` + `sbom: true` (#218); this is the first release that exercises that path. Verify on the published image with:
+
+```sh
+docker buildx imagetools inspect ghcr.io/askalf/dario:v3.37.6 --raw \
+  | jq '.manifests[].annotations'
+```
+
+You should see `vnd.in-toto.attestation+v0.1` (provenance) and `application/vnd.cyclonedx+json` (SBOM) manifest entries in the index. Closes the README "every release is SLSA-attested" claim across both artifact types.
+
+### Added — release-pipeline concurrency group
+
+Added `concurrency: { group: cc-drift-auto-release-master, cancel-in-progress: false }` to the release job (#218). Serializes overlapping triggers — a `pull_request: closed` and the `:15-past-the-hour` cron firing seconds apart can no longer both pass the gate step (TOCTOU on `gh release view`) and race on `gh release create`. `cancel-in-progress: false` because in-flight runs are doing real work (build / test / publish); the second trigger waits, doesn't abort.
+
+### Added — `docs/returning.md`, `docs/compat-matrix.md`, `CLAUDE.md`
+
+Three new docs landed during the post-Colossus-deal prep cycle:
+
+- **`docs/returning.md`** (#217) — five-minute landing page for users who set dario up earlier in the v3.x cycle and drifted off. Covers what changed (cc-drift-watch hourly, GHCR image, `--manual` OAuth, pool mode, `--system-prompt=partial`, MCP / sub-agent), upgrade vs fresh-install, keeping Codex CLI / Cursor BYOK / OpenAI direct on the same proxy via `dario backend add openai`, multi-account pool, k8s, and a `--passthrough` deprecation note.
+- **`docs/compat-matrix.md`** (#220) — one-page status table per tool, working / inferred / untested. 17 tools across Claude Code, Cursor, Continue, Aider, Cline / Roo / Kilo, Zed, OpenHands, OpenClaw, hands, CC sub-agents, Claude Agent SDK, MCP clients, Codex CLI, Hermes, Windsurf, Claude Desktop, GitHub Copilot. Each cell links to the walkthrough or per-tool docs that back it.
+- **`CLAUDE.md`** (#219) — repo memory for Claude Code and other LLM coding agents. No session-URL footers, no "Generated by Claude" markers, match the existing prose voice in docs, stay out of the cc-drift bot's lane on `maxTested` bumps.
+
+### Added — Codex CLI passthrough smoke test
+
+`test/openai-backend-passthrough.mjs` (#220, 18 assertions): in-process `node:http` mock on an ephemeral port, calls `forwardToOpenAI` with a Codex-CLI-shape body (function-calling tools array, `tool_choice: 'auto'`, `stream: false`, `gpt-4o` model). Verifies byte-for-byte body passthrough, `Authorization` swap from client bearer to backend key, no `anthropic-beta` / `x-api-key` leak through, response/CORS forwarding. Backs the README's "Codex CLI" hero claim — generic OpenAI-compat passthrough holds, no Codex-specific code path needed. Auto-discovered by `test/all.test.mjs`.
+
+### Changed — README hero, FAQ, count refresh
+
+- **Hero one-liner** now lists Codex CLI alongside Cursor / Aider / Cline / Zed (#217).
+- **30-seconds quickstart** gained a Docker pointer to `ghcr.io/askalf/dario:latest` and `docs/docker.md` (#217) — image landed in #208, framing was npm-only.
+- **New FAQ entry** for the returner case pointing at `docs/returning.md` (#217).
+- **Count refresh** (#219, follow-up in #220 for `agent-compat.md`): `~12,650` lines / `27` files / `59` TOOL_MAP entries → `~13,170` / `28` / `66`.
+
+### Changed — `.dockerignore` defensive excludes
+
+Added `.env`, `.env.*`, `*.local.json` (#219). Defense in depth — none referenced by the Dockerfile's `COPY` directives, but a developer's local `.env` shouldn't land in BuildKit's RAM during the build context load.
+
+## [3.37.5] - 2026-05-06
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.128` → `2.1.132` for CC v2.1.132. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.4] - 2026-05-05
+
+### Fixed — `vX.Y` and `vX` Docker tags lost their `v` prefix
+
+The first GHCR publish in v3.37.3 produced rolling tags `:3.37` and `:3` instead of the documented `:v3.37` and `:v3` because the metadata-action match pattern used `pattern=v(\d+\.\d+),group=1` — extracting capture group 1 strips the `v` prefix from the output. Pinned tags `:v3.37.3` and `:latest` were unaffected.
+
+This release fixes both publish paths:
+
+- **`cc-drift-auto-release.yml`** — dropped `group=1` and the parens; pattern is now `v\d+\.\d+` (no capture group), so the metadata-action outputs the full match including the `v` prefix.
+- **`docker-publish.yml`** — switched from `type=semver,pattern={{major}}.{{minor}}` (which strips `v`) to `pattern=v{{major}}.{{minor}}` (literal `v` in the template). Same idea, semver-flavor syntax.
+
+After v3.37.4 ships, `:v3.37` and `:v3` resolve as documented, and the orphan `:3.37` and `:3` from v3.37.3 stay frozen at the v3.37.3 image until the next release that would normally have advanced them.
+
+## [3.37.3] - 2026-05-05
+
+### Added — official Docker image at `ghcr.io/askalf/dario`
+
+The Dockerfile + docs landed in dario#207, but the publish wiring didn't — `ghcr.io/askalf/dario:latest` was 404'ing because no workflow ever pushed an image. This release closes that gap.
+
+- **`docker-publish.yml`** — new workflow on `release: published` for the manual-release fallback path. Multi-arch buildx for `linux/amd64` + `linux/arm64`, GHCR auth via `GITHUB_TOKEN`, semver-derived tag matrix (`vX.Y.Z`, `vX.Y`, `vX`, `latest`).
+- **`cc-drift-auto-release.yml`** — added inline docker build/push steps after the inline npm publish. Same loop-protection reasoning that forced inline npm publish: `gh release create` invoked from a workflow uses GITHUB_TOKEN attribution, which suppresses downstream `release: published` triggers, so docker-publish.yml never fires from this path.
+- **`packages: write`** added to the cc-drift-auto-release.yml permissions block for the inline GHCR push.
+
+Both publish paths build the same Dockerfile and tag with the same matrix; Docker tags overwrite, so a duplicate run for the same release is a safe no-op.
+
+## [3.37.2] - 2026-05-04
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.126` → `2.1.128` for CC v2.1.128. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.37.1] - 2026-05-03
+
+### Drift fix — `--effort=max` (CC v2.1.126 supported, dario didn't)
+
+CC's `--effort` flag accepts `low|medium|high|xhigh|max`; dario's enum stopped at `xhigh` so `dario proxy --effort=max` errored with *"Invalid --effort value"*. Surfaced from a real user request in dario#190 — they were comparing dario behavior to CC's max-thinking mode and couldn't pin it through the proxy.
+
+Verified by capture against the installed CC binary: `claude --effort=max --print -p hi` wires `output_config.effort: "max"` cleanly (same shape as the other levels, `effort-2025-11-24` beta gate already present). No other levels are missing — just `max`.
+
+### Added
+
+- `'max'` added to `EffortValue` type and `VALID_EFFORT_VALUES` constant.
+- `dario proxy --effort=max` and `DARIO_EFFORT=max` now valid; outbound `output_config.effort` becomes `"max"` on non-haiku requests.
+- Test coverage in `test/effort-flag.mjs`: `VALID_EFFORT_VALUES.includes('max')`, `length === 6`, `resolveEffort('max', {}) === 'max'`, client-passthrough of `"max"`, `buildCCRequest` integration, CLI parser.
+
+### Files
+
+- `src/cc-template.ts` — `EffortValue` union + `VALID_EFFORT_VALUES`, docstring.
+- `src/cli.ts` — `--effort=` help text.
+- `test/effort-flag.mjs` — added `max` cases, bumped length assertion, updated invalid-value stderr regex.
+
+## [3.37.0] - 2026-05-02
+
+Adds `dario shim --priority=<level>` for setting the spawned child's scheduling priority. Cross-platform via Node's `os.setPriority` — `BELOW_NORMAL_PRIORITY_CLASS` on Windows / `nice +7` on POSIX for `below-normal`, `IDLE_PRIORITY_CLASS` / `nice +19` for `low`. Default remains `normal` (no behavior change for existing users).
+
+### Why this is needed
+
+When claude is running on the same Windows machine you're RDP'd into, agent-loop bursts can saturate the CPU and starve kernel network IO threads. The result is a drop pattern that *looks* like a network problem — every NIC drops, RDP socket writes return `ERROR_SEM_TIMEOUT` (`0x80070079`), reason code `2147942521` in the TerminalServices log — but is actually CPU starvation above the NIC layer. Other devices on the network are unaffected; gateway pings stay clean. Lowering the claude child's priority lets the kernel preempt it when it needs to send a packet. Same throughput when nothing else needs CPU; instant preemption when something does.
+
+Pattern confirmed end-to-end: dropped to `BelowNormal` mid-session and observed the symptom move from "every 2-15 minutes" to "intermittent at much lower rate." On very modest hardware (4-core / 4-thread Sandy Bridge era), `--priority=low` plus a manual `(Get-Process claude).ProcessorAffinity = 0x07` reserving one logical CPU for the OS is the belt-and-suspenders combo. Documented in [`shim.md`](./docs/shim.md) and [`faq.md`](./docs/faq.md).
+
+### Added
+
+- `dario shim --priority=normal|below-normal|low -- <cmd>` flag — wires through to `runShim()` as a typed option, applied via `os.setPriority(child.pid, ...)` after spawn. Best-effort: failures are logged at `-v` and the child continues at default. Verbose mode prints the priority change line so users can confirm the call succeeded.
+- `ShimHostOptions.priority` field exposed on the public host API for programmatic callers.
+- `ShimPriority` type export.
+
+### Files
+
+- `src/shim/host.ts` — `setPriority` import, `ShimPriority` type, `priorityValue()` helper, post-spawn priority application with try/catch and verbose logging.
+- `src/cli.ts` — `--priority=<level>` flag parsing in the `shim` subcommand, with explicit input validation (rejects unknown values with exit 1) and an updated usage line.
+- `docs/commands.md` — flag row update.
+- `docs/shim.md` — full section on the RDP-host scenario, the cross-platform mapping table, and the recommendation matrix.
+- `docs/faq.md` — new entry "My RDP / RemotePC session randomly drops while claude is working" with the three-fix escalation path.
+
+### Backward compatibility
+
+Default `priority=normal` is a no-op (the `setPriority` call is skipped entirely). Existing `dario shim` invocations behave identically. No env var, no breaking changes.
+
+## [3.36.0] - 2026-05-02
+
+Fix Cursor BYOK routing for Claude (dario#190) — apply `MODEL_ALIASES` at request time on the provider-prefix path, plus surface Cursor's built-in name collision in the docs so users don't lose hours debugging "looks fine, charges API costs anyway."
+
+### Why this is needed
+
+Cursor's "Override OpenAI Base URL" silently rewrites any model name it recognizes as built-in (`claude-opus-4-7`, `claude-sonnet-4-6`, etc.) to its own Anthropic gateway path. Requests never reach `localhost:3456`; the user's Cursor API credits get charged; `dario doctor --usage` stays at 0.0% used. There's no "Override Anthropic Base URL" in Cursor and no plans to ship one ([year-old open feature request](https://forum.cursor.com/t/missing-anthropic-base-url-override-in-cursor-byok/158805)).
+
+The only workaround is to use a model name Cursor doesn't recognize — naturally that means dario's `claude:`/`anthropic:` provider-prefix syntax. But the request-time path didn't resolve aliases, so `claude:opus` would forward `model: "opus"` upstream and Anthropic 400'd it. Users had to type the full `claude:claude-opus-4-7` to make it work. This release closes that gap.
+
+### Changed — `claude:opus` / `anthropic:opus` now resolve aliases upstream
+
+`MODEL_ALIASES` (`opus` → `claude-opus-4-6`, `sonnet` → `claude-sonnet-4-6`, `haiku` → `claude-haiku-4-5`, plus `opus1m`/`sonnet1m`) now applies at request time on the provider-prefix path, not just at CLI startup. So `model: "claude:opus"` arrives upstream as `claude-opus-4-6` exactly like `--model=opus` would have.
+
+```jsonc
+// Cursor sends:
+{ "model": "claude:opus", "messages": [...] }
+
+// dario forwards upstream:
+{ "model": "claude-opus-4-6", "messages": [...] }
+```
+
+OpenAI-side prefixes (`openai:`, `groq:`, `openrouter:`, `local:`) keep their pass-through behavior — they go to the configured backend with the stripped name unchanged, since those backends decide their own model namespace.
+
+### Docs
+
+- `docs/agent-compat.md` Cursor section rewritten with a prominent built-in-collision warning, the `claude:opus` / `claude:sonnet` / `claude:haiku` workaround, the "no Verify button in recent Cursor" note (UI removed it; the green toggle is sufficient), and a verification checklist that surfaces the `dario proxy --verbose` line you should see when the prefix path activates. Notes that there is no "Override Anthropic Base URL" in Cursor and links the open feature request.
+
+### Files
+
+- `src/proxy.ts` — extracted `resolveClaudeAlias(model)` helper from the existing `MODEL_ALIASES` table; called from the provider-prefix block when `forcedProvider === 'claude'`. Unknown / canonical names pass through unchanged. Verbose log now includes an `(alias: opus → claude-opus-4-6)` annotation when resolution fires.
+- `test/provider-prefix.mjs` — extended with 10 new assertions covering `resolveClaudeAlias` directly: short aliases (`opus`/`sonnet`/`haiku`/`opus1m`/`sonnet1m`), canonical pass-through (`claude-opus-4-7`/`claude-sonnet-4-6`/`claude-haiku-4-5`), unknown-name pass-through, empty string. Total 26/26 assertions in this file.
+- `docs/agent-compat.md` — Cursor section rewrite (see above).
+
+## [3.35.0] - 2026-05-02
+
+Adds `--upstream-proxy=<url>` / `--via=<url>` / `DARIO_UPSTREAM_PROXY` for routing dario's outbound traffic (api.anthropic.com requests, OpenAI-compat backend forwarding, OAuth flows) through an HTTP/HTTPS proxy without putting the entire host on a system VPN. Pairs with the HTTP-proxy endpoint of common VPN providers (Mullvad, AirVPN), corporate proxies, privoxy-on-Tor, Cloudflare WARP's proxy mode, or self-hosted squid in a desired jurisdiction.
+
+### Added — `--upstream-proxy=<url>` / `--via=<url>` flag
+
+New flag (and `DARIO_UPSTREAM_PROXY` env mirror) wraps `globalThis.fetch` at startup so every dario-side fetch — `/v1/messages` upstream, `/v1/chat/completions` upstream, OAuth refresh, drift checks, doctor probes — goes through the supplied proxy. Localhost-bound fetches (loopback / `127.0.0.1` / `::1` / `*.localhost`) bypass the wrapper, so the inbound HTTP server and any internal self-targeting calls aren't accidentally tunneled.
+
+```bash
+dario proxy --upstream-proxy=http://10.64.0.1:80           # Mullvad HTTP endpoint
+dario proxy --via=http://127.0.0.1:8118                    # local privoxy (e.g. on top of Tor)
+DARIO_UPSTREAM_PROXY=http://user:pass@proxy.corp:8080 dario proxy
+```
+
+### Constraints
+
+- **Requires Bun runtime.** Bun's `fetch` implements the `proxy` option natively. Node's built-in fetch (undici-backed) ignores it silently — to avoid a false-success failure mode where the flag appears to work while requests actually go direct, dario refuses to start with `--upstream-proxy` unless running under Bun. dario already auto-relaunches under Bun for TLS-fidelity reasons; this lands cleanly on the existing Bun-preferred architecture.
+- **HTTP/HTTPS schemes only.** SOCKS is rejected at parse time with a clear error pointing at the HTTP-proxy endpoints common providers expose alongside SOCKS5, plus the privoxy-bridge fallback for SOCKS-only providers (Bun 1.3.x's `UnsupportedProxyProtocol` for `socks5://`).
+- **TLS terminates end-to-end at Anthropic.** The proxy sees only destination hostname (via SNI) and byte timing. Bun's BoringSSL ClientHello is preserved.
+- **CC's own outbound (during live capture)** is not affected — the spawned `claude` binary uses the host's network. Use a system VPN (Option A in `docs/vpn-routing.md`) if you also want CC's capture traffic tunneled.
+
+### Files
+
+- `src/outbound-proxy.ts` (new) — `parseOutboundProxy` + `isLocalhostUrl` + `installOutboundProxyWrapper`. Pure decision functions for the parser; loopback detector handles IPv6 bracket form. Wrapper is installed once at startup from `cli.ts` before `startProxy`.
+- `src/cli.ts` — flag parsing (`--upstream-proxy=`, `--via=`, `DARIO_UPSTREAM_PROXY`), validation with fail-fast on bad scheme / SOCKS / unparseable URL, runtime-required Bun check, startup banner showing the masked URL.
+- `src/doctor.ts` — `Outbound proxy` info row when `DARIO_UPSTREAM_PROXY` is set, displaying the URL with credentials masked.
+- `test/outbound-proxy.mjs` (new) — 47 assertions covering empty/null inputs, http/https accepted, credential masking, SOCKS rejection (5 schemes × 3 assertions each), non-http schemes rejected, invalid URL rejected, IPv4/IPv6/`*.localhost` loopback detection, and edge cases (URL objects, Request-shaped objects, null/undefined, garbage). Total test footprint now 59 across 4 suites.
+- `docs/vpn-routing.md` (new) — three-option layout: system VPN (Option A, zero config), per-process via `--upstream-proxy=` (Option B, this release), Tailscale exit nodes (Option C, zero dario config). Provider matrix for HTTP-proxy endpoints across Mullvad / AirVPN / ProtonVPN / privoxy / WARP / corporate / squid. Verification steps + what this does and does NOT do.
+- `docs/commands.md` — flag row.
+
+## [3.34.1] - 2026-05-01
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.123` → `2.1.126` for CC v2.1.126. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.34.0] - 2026-04-30
+
+User-controlled system-prompt mode. Productizes the classifier-empirical finding from PR #171 / `scripts/test-system-prompt-mods.mjs`: Anthropic's billing classifier doesn't read the system prompt content, so users can strip CC's behavioral constraints (Tone-and-style, Text-output, scope/verbosity/comment bullets in Doing-tasks) and recover ~1.2–2.8× output capability on open-ended work — without losing subscription billing. Default `verbatim` preserves existing behavior so nothing regresses.
+
+### Added — `--system-prompt=<verbatim|partial|aggressive|filepath>` flag
+
+New `--system-prompt` flag (and `DARIO_SYSTEM_PROMPT` env mirror) controls the system prompt dario sends upstream on Claude-backend requests:
+
+- **`verbatim`** *(default)* — CC's prompt unchanged, byte-for-byte. Existing setups don't regress.
+- **`partial`** — strip purely behavioral constraints. Removes the entire `# Tone and style` and `# Text output` sections. Removes the scope-discipline / verbosity / commenting bullets in `# Doing tasks` ("Don't add features", "Default to writing no comments", "Don't explain WHAT the code does", etc.). Inserts a positive replacement instruction. Keeps every `IMPORTANT:` refusal reminder, every tool description, and `# Executing actions with care` intact. Recovers ~1.2–2.8× output capability on open-ended work in the empirical test.
+- **`aggressive`** — partial + remove the prompt-level RLHF restatements (`IMPORTANT: Assist with authorized security testing…`, `IMPORTANT: You must NEVER generate or guess URLs…`) and the `# Executing actions with care` overcaution section. Adds <3% practical difference over partial in the empirical test because alignment is RLHF-trained, not prompt-trained — RLHF refusals on harmful content survive prompt removal. Provided for completeness and so the test matrix could distinguish "behavioral constraint" (real, in-prompt effect) from "alignment restatement" (decorative, behavior is in the weights).
+- **`<file path>`** — replace `system[2].text` entirely with the contents of a file. CLI reads the file at startup; runtime path stays filesystem-pure. An empty file or unreadable path fails fast with a clear error rather than silently degrading to verbatim — same fail-loud philosophy as `--strict-tls` / `--strict-template`.
+
+Surfaced in `dario doctor` as a `System-prompt mode` row that reports the active mode + char-count delta vs CC's default. Operators can confirm at a glance which mode is actually live without reading the proxy log.
+
+Strip rules in `src/cc-template.ts:resolveSystemPrompt` are ported byte-for-byte from `scripts/test-constraint-removal.mjs:stripConstraints` — same regex list, same replacement text. The strip degrades gracefully on a future CC bump that renames section headers (regex non-match → input returned unchanged), and `test/system-prompt-modes.mjs` asserts the strip removed at least 500 chars to catch silent regression.
+
+### What this is not
+
+- **Not bypassing alignment.** RLHF refusal behavior is trained into the weights, not the prompt. The aggressive mode includes prompt-level RLHF restatement removal specifically to test that the prompt restatement is decorative — and the <3% empirical delta vs partial is the receipt. Operators running `--system-prompt=aggressive` against `claude-opus-4-7` on harmful prompts still get refusals.
+- **Not detected as misuse.** 7/7 variants in `scripts/test-system-prompt-mods.mjs` routed to `five_hour` (subscription). System prompt content, length, and block count are not classifier inputs at the time of measurement. If Anthropic later starts fingerprinting this slot, the rate-limit-classifier headers will surface the change and the docs will be updated.
+- **Not specific to dario.** Any client building its own request body could already do this. Dario makes it a one-flag operation that preserves the rest of the CC wire-shape axes (header order, body field order, billing tag, beta flags) so the rest of the subscription routing path keeps working.
+
+Documentation: [`docs/system-prompt.md`](docs/system-prompt.md) for the user-facing how-to; [`docs/research/system-prompt.md`](docs/research/system-prompt.md) for the empirical methodology and result tables.
+
+### Tests
+
+`test/system-prompt-modes.mjs` — 24 assertions, pure decision-function tests against the real CC system prompt. Covers verbatim default (3 cases including `undefined`/`''`/`'verbatim'`), partial mode (10 cases — section removal + IMPORTANT-line preservation + positive-replacement-insertion + at-least-500-char-removed regression catch), aggressive mode (6 cases — additional RLHF-restatement + Executing-actions removal), custom literal text (4 cases including 50k-char input + edge cases), and the load-bearing invariant that `partial → aggressive` delta < `verbatim → partial` drop. No upstream calls.
+
+## [3.33.0] - 2026-04-30
+
+One new feature (`hands` client detection — unblocks hands SDK mode → dario for OAuth subscription billing), three release-machinery fixes (auto-release silently bypassed since v3.31.11, plus a latent bug in the first attempt at the fix, plus a credential-resolution regression that was breaking `dario proxy` startup against fresh CC creds), and a set of maintainer diagnostic scripts that came out of the same-day classifier research published in [Discussion #172](https://github.com/askalf/dario/discussions/172).
+
+PRs in this release: #170 (auto-release scheduled fallback), #171 (maintainer diagnostics), #173 (idempotency gate fix), #174 (hands identity detection), #175 (credential freshness fallthrough).
+
+### Added — `hands` identity detection (auto preserve-tools)
+
+New entry in `detectTextToolClient`: `/\bYou are a computer control agent\b/` → `'hands'`. Matches both of [hands](https://github.com/askalf/hands)'s system prompt variants — CLI mode (`"You are a computer control agent with FULL access to this <os> machine ..."`) and SDK mode (`"You are a computer control agent on <os> ..."`).
+
+Why identity match is the right routing: hands SDK mode sends Anthropic's beta computer-use tools — `computer` (`type: 'computer_20251124'`), `bash` (`type: 'bash_20250124'`), `str_replace_based_edit_tool` (`type: 'text_editor_20250728'`). Tool *name* `bash` overlaps with `TOOL_MAP` and would normally route to CC's `Bash` schema, but the wire shape is Anthropic's beta tool with no `description` field and no `command`/`cmd` rename — default round-robin would corrupt the calls. The other two tools aren't in `TOOL_MAP` at all and would round-robin onto CC's first-available slots and lose their semantics. 67% unmapped is below `detectNonCCByTools`'s 80% threshold so structural fallback won't catch hands either; identity match → auto preserve-tools is the only correct path. Same shape as the existing `arnie` entry from v3.30.
+
+End-to-end use case unblocked: hands SDK mode + `ANTHROPIC_BASE_URL=http://localhost:3456` now routes through dario for OAuth subscription billing instead of paying per-token via API key. dario detects hands' identity, preserves the beta tool array, OAuth-swaps the auth, forwards to api.anthropic.com. Live-verified end-to-end across all four hands tool surfaces (computer / bash / text_editor / read_page) with full multi-turn agent loops; all routed `five_hour`. See dario PR #174 + hands [#29](https://github.com/askalf/hands/pull/29) for the verification trace.
+
+### Fixed — `loadCredentials` picks freshest source, doesn't shadow CC fallback with stale dario file
+
+`dario proxy` was failing with `"Not authenticated. Run dario login first."` even when CC was authenticated and OAuth worked end-to-end — once any prior `dario login` had created `~/.dario/credentials.json` and that file subsequently went stale (refresh_token invalidated by Anthropic over weeks of disuse).
+
+Root cause: `loadCredentials` returned the **first source with the right shape** (both `accessToken` + `refreshToken` keys present) regardless of expiry. Stale dario file → first match → returned. The CC fallback at `~/.claude/.credentials.json` was reachable but never reached.
+
+Fix: read every available source (dario file, CC file, OS keychain) and pick the freshest by `expiresAt`. Stable on ties — dario file remains the preferred source on equal expiresAt. Refactor: `pickFreshestCredentials` extracted as exported helper for direct test coverage. New test file `test/credential-freshness.mjs` with 10 assertions across empty / single / multi-source / tie-breaking / malformed-expiresAt cases.
+
+### Fixed — auto-release workflow (twice)
+
+The `Auto release on version bump` workflow was silently bypassed for **every bot-auto-merged PR from v3.31.11 through v3.32.2**. v3.32.1 and v3.32.2 both required manual `gh release create` because the maintainer noticed the missing publish.
+
+Fix iteration 1 (#170): added `schedule: '15 * * * *'` and `workflow_dispatch` triggers alongside the existing `pull_request: closed` path. Schedule events are system-initiated and not subject to GitHub's GITHUB_TOKEN loop-protection, so they catch bot-merged version bumps within an hour. Refactored the gate to be idempotent across over-fires (`tag-exists` → `proceed=false` instead of `exit 1`), added a `Resolve merged PR context` step that derives PR number / head_ref from the master HEAD commit's `(#N)` suffix when no `pull_request` payload is available.
+
+Fix iteration 2 (#173): the gate from iteration 1 used `git rev-parse "$TAG"` against the local checkout. The job uses `actions/checkout@... fetch-depth: 2` for the HEAD^1 version-diff fast-exit; `fetch-depth: 2` does NOT fetch tags, so the local tag-exists check returned false for an existing remote tag. Gate set `proceed=true`, workflow tried to cut a duplicate release, exited 1. Two scheduled runs (17:47Z, 19:52Z on 2026-04-29) failed before being noticed. Switched the gate to `gh release view "$TAG"` — hits the GitHub API directly, decoupled from local fetch state. Verified via `workflow_dispatch` immediately after merge.
+
+End-to-end verification of the bot-auto-merge → schedule-trigger → release path is pending the next CC patch cycle. Steady state from this point: hourly cron tick is a clean no-op exit when no version bump is pending.
+
+### Added — maintainer diagnostics: `scripts/capture-full-body.mjs`, `scripts/test-system-prompt-mods.mjs`, `scripts/test-constraint-removal.mjs` (#171)
+
+Three paired diagnostic scripts under `scripts/` that don't ship with the package and aren't invoked from CI. Used during the classifier research published in [Discussion #172](https://github.com/askalf/dario/discussions/172):
+
+- **`capture-full-body.mjs`** — captures the literal **values** CC wires on `/v1/messages` (effort, max_tokens, thinking config, model, etc.) — fields the existing `capture-and-bake.mjs` strips during `scrubTemplate`. Verifies CC's actual wire values against Anthropic's stated defaults in ~10s.
+- **`test-system-prompt-mods.mjs`** — A/B billing-classifier probe against system prompt mutations. 7-variant ladder showed all variants — including replacing CC's 27k-char system prompt with a 321-char custom one and adding a 4th block — route to `five_hour`. **System prompt content, length, and block count are not classifier inputs** (revises one of [Discussion #13](https://github.com/askalf/dario/discussions/13)'s 8-signal claims).
+- **`test-constraint-removal.mjs`** — A/B model behavior delta when CC's behavioral constraints are stripped. Confirmed removing prompt-level alignment reminders contributes <3% over partial strip (RLHF is doing the alignment work, not the prompt).
+
+Each script reads OAuth directly from `~/.claude/.credentials.json` — robust against stale `~/.dario/` state. Each `test-*` invocation dispatches real upstream requests (7 / 9 respectively) on the maintainer's Max plan; cost is negligible but worth knowing before running. Discussion #172 is the public writeup with reproduction instructions.
+
+## [3.32.2] - 2026-04-29
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.122` → `2.1.123` for CC v2.1.123. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.32.1] - 2026-04-28
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.121` → `2.1.122` for CC v2.1.122. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+## [3.32.0] - 2026-04-28
+
+Backlog clear-out — five new operator-facing features (one per merged PR) plus a test-suite cleanup. Net: dario gets a structural fallback that catches in-house non-CC clients without per-client maintenance, an append-only request log for backgrounded proxies, four `dario doctor` improvements, an operator-pinned beta allow-list, a user-facing `dario usage` summary, and an experimental `--merge-tools` mode. Wire shape unchanged on the default path; every new behavior is opt-in via flag, env var, or detector heuristic. Test suite goes from 54/56 to 56/56 — both long-running failures fixed alongside the feature work.
+
+PRs in this release: #158 (auto-detect + `--log-file`), #159 (doctor improvements), #160 (`--passthrough-betas`), #161 (`dario usage`), #162 (`--merge-tools`), #163 (test-suite cleanup).
+
+### Added — `--merge-tools` (EXPERIMENTAL) — append client tools after CC's canonical set
+
+Third tool-routing mode, sitting alongside `--preserve-tools` (forward client tools verbatim) and `--hybrid-tools` (remap to CC + inject request-context). Merge mode sends CC's canonical tool array first, then appends the client's custom tools deduped by name (case-insensitive). The model sees the union and may call either side; tool calls flow back unchanged because no reverse-mapping runs in this branch.
+
+Why merge mode exists: today, a client routing custom tools through dario must choose between subscription routing (default mode, but custom tools get round-robin'd onto CC fallback slots and silently corrupt their schemas) and tool fidelity (`--preserve-tools`, but loses CC's wire-shape `tools[]` axis and may flip Anthropic's billing classifier to extra-usage). Merge mode is the conservative attempt at both: keep CC's `tools[]` array intact as a prefix so the fingerprint axis stays close to canonical, append the operator's custom tools as a suffix. Whether the suffix is enough divergence to trigger a billing flip is *unknown* — Anthropic's classifier is closed-source. Marked EXPERIMENTAL because validation is operator-side: start the proxy with `--merge-tools --verbose`, send 1-2 requests, watch the `[dario] #N billing: <bucket>` line. If `bucket=subscription` (or `subscription_fallback`), merge is safe on this account/tier; if it flips to `extra_usage` or `api`, fall back to a different mode.
+
+Other points worth flagging:
+
+- **Mutually exclusive** with `--preserve-tools` and `--hybrid-tools`. Both dario CLI and `startProxy` enforce the mutex; defensive `buildCCRequest` degrades to preserve mode if all three flags somehow reach it (regression guard, not user contract).
+- **Dedupe** is name-based, case-insensitive. A client tool named `Bash` collides with CC's `Bash` and is dropped from the appended tail; CC's `Bash` is what the model sees. This is intentional — the client's `Bash` schema may not match CC's, and silently double-occupying the slot would confuse the model and break the wire shape.
+- **Auto-detect respects merge.** Even when the system prompt would normally trigger auto-preserve (Cline / Kilo / arnie / etc.), explicit `--merge-tools` outranks the heuristic — operator opt-in wins. `detectedClient` still surfaces in the request log so the operator can see what was detected even though the routing was overridden.
+- **Empty client tools** + merge: dario still emits CC's canonical tool array. Operator chose merge because the wire shape matters; a zero-tools request is itself a divergence from CC's wire footprint.
+
+CLI flags: `--merge-tools` (alias: `--append-tools`). Help text + README entry call out the experimental status. Test: `test/client-detection.mjs` section 12 covers the union, the dedupe, the mutex (preserve wins as a safety degrade), the auto-detect override, and the empty-client-tools case.
+
+### Added — `dario usage` CLI + MCP `usage` tool
+
+User-facing burn-rate summary of the running proxy's traffic. Hits `/analytics` on the local proxy, prints a focused human-readable digest: requests in the last 60 minutes, input/output token totals, average latency, error rate, subscription % vs. extra-usage, estimated would-be API cost, plus a per-account breakdown when pool mode is active. Closes the gap between `/health` (auth/expiry only), `/analytics` (raw JSON, pool-mode only) and `dario doctor --usage` (one-off rate-limit probe to Anthropic, costs a subscription request).
+
+The CLI:
+
+- `dario usage` — human-readable digest. Defaults to port 3456; override with `--port=N` or `DARIO_USAGE_PORT`.
+- `dario usage --json` — raw `/analytics` payload for status bars / CI dashboards / scripting.
+- When the proxy isn't reachable, the CLI prints a hint pointing at `dario doctor --usage` (different purpose — Anthropic-side rate-limit snapshot — but the closest substitute when there's no live traffic to summarize).
+- In single-account mode, prints the existing `/analytics` "pool-mode only" note plus the same `dario doctor --usage` pointer rather than failing.
+
+The MCP tool (`usage` in `dario mcp`) returns the same digest as text content. New `UsageSummary` shape exported from `src/mcp/tools.ts` keeps the tool surface decoupled from internal `Analytics` record fields. Port resolution: `DARIO_USAGE_PORT` → `DARIO_PORT` → 3456.
+
+Test: `test/mcp-tools.mjs` registry-shape check expanded from 6 to 7 tools; new sections cover unreachable-proxy (isError + actionable hint), single-account mode (pool-only note + substitute pointer), pool mode with traffic (full digest + per-account block), pool mode with zero traffic (header only, no token totals).
+
+### Added — `--passthrough-betas` / `DARIO_PASSTHROUGH_BETAS` (operator-pinned beta allow-list)
+
+Lets the operator declare beta flags that are ALWAYS forwarded upstream regardless of CC's captured set or the client's anthropic-beta header. Bypasses `filterBillableBetas` (the safety filter that strips `extended-cache-ttl-*` from client-provided headers, since those require Extra Usage); the operator pin is "I know what I'm doing on this account" — a billable flag pin succeeds when the account has Extra Usage enabled and 400's otherwise, in which case the per-account rejection cache (dario#42) drops it on the retry rather than re-sending forever.
+
+Why this matters: today, beta flags only land upstream if (a) they're in the live-captured CC template, or (b) the client puts them in `anthropic-beta` and they survive the billable filter. Three scenarios that miss:
+
+1. A new beta Anthropic enabled for your account but not for CC's wire shape (e.g. `prompt-caching-2024-07-31` extensions, account-tier-gated betas).
+2. A beta the client doesn't know to ask for but the operator wants on every request.
+3. A beta that shows up in CC's later wire shape but dario hasn't re-baked the bundled template yet.
+
+`--passthrough-betas=name1,name2` and `DARIO_PASSTHROUGH_BETAS=name1,name2` both accept comma-separated lists. The CLI flag wins over the env var. Empty flag value (`--passthrough-betas=`) clears the env-default — the documented "I want NO pinned betas" override. Pinned flags are surfaced at proxy startup so operators can see exactly what's pinned-on without re-reading their config.
+
+Test: `test/passthrough-betas.mjs` covers the parser (env, flag, override semantics, dedupe, whitespace) and replays the proxy's beta-build sequence to lock in: pinned beta bypasses billable filter, pinned beta is dropped when in the rejected-cache, pin already in base doesn't duplicate.
+
+### Added — doctor improvements: per-request overhead, pool-rotation visibility, tool-substitution warn, `--bun-bootstrap`
+
+Four observability additions concentrated around `dario doctor` and the proxy's request log lines. None of them change wire shape; they all make existing behavior visible to the operator.
+
+1. **Per-request overhead row in `dario doctor`.** Reports the system-prompt char count, tool count, and tool-defs JSON-serialized size — the three things that get injected into every non-passthrough request and dominate the input-token cost on small turns. No token estimate (the prose vs. tool-schema-JSON tokenizer ratio varies enough that any single divisor is misleading); the message points at `cache_creation_input_tokens` on the first response and `dario doctor --usage` for the exact figure. Sets expectations for non-CC users surprised by the first-request charge.
+
+2. **Pool-rotation visibility in `dario doctor`.** When 2+ accounts are loaded, a new `Pool routing` row reports the next account `pool.select()` would pick (max-headroom policy, family-agnostic) and the healthy/total count. Previously the operator had to GET `/accounts` to see who's next. Bypassed when only one account is loaded since "rotation" doesn't apply.
+
+3. **Tool-substitution warn line in proxy logs.** When a non-CC client routes tools that don't exist in `TOOL_MAP` and neither auto-detect nor an explicit flag flipped to preserve-tools, the unmapped tools get distributed onto CC fallback slots — schema-compatible cases are fine but invisible to operators who didn't expect it. New per-`(client family, mapping mode)` once-only line: `[dario] tool substitution: N/M client tools not in TOOL_MAP — remapped onto CC fallback slots (sample, +K more). Pass --preserve-tools to forward your schemas verbatim instead.`. De-dupe key matches the auto-detect line so mixed-traffic proxies don't spam.
+
+4. **`dario doctor --bun-bootstrap` — one-shot Bun installer.** Closes the gap between the existing Node-only TLS fingerprint warn and "Bun on PATH" without making the user copy-paste a curl-to-shell line. Skips when Bun is already installed; on a fresh host runs the platform-correct upstream installer (`curl -fsSL https://bun.sh/install | bash` on Unix; `powershell -c "irm https://bun.sh/install.ps1 | iex"` on Windows). Pure delegation to bun.sh — dario does not vendor or pin a Bun version.
+
+Tests: `test/runtime-fingerprint.mjs` gains a `bunBootstrap` runner-string check (does not actually invoke the installer; clears PATH to force a fail-fast and asserts the platform-correct upstream URL is what the function would run).
+
+### Added — `arnie` identity detection + structural non-CC fallback (auto preserve-tools)
+
+Two new entries in the auto-preserve-tools detector that runs ahead of every request body build:
+
+1. **`detectTextToolClient` — arnie identity match.** `arnie` (askalf) is a portable IT-troubleshooting CLI built on the Anthropic SDK; its system prompt opens with `You are Arnie, a portable IT tech troubleshooting assistant ...`. arnie's tool *names* (`shell`, `read_file`, `grep`, ...) overlap with `TOOL_MAP` so the structural fallback below won't catch it, but the *schemas* diverge from CC's (arnie's `shell` takes `{cmd, timeout_s, working_directory}`; CC's `Bash` takes `{command, description}`). Default round-robin remap silently corrupts those calls — the model upstream is told its tool is `Bash`, returns a `Bash`-shaped argument object, and arnie can't bind it back to its own schema. Identity match → auto preserve-tools is the only correct routing.
+
+2. **`detectNonCCByTools` — structural fallback for unknown clients.** New helper, called only when `detectTextToolClient` returns null. When the operator hands us 3+ tools and ≥80% of them don't appear in `TOOL_MAP`, that's a custom client whose tool surface has effectively no overlap with CC's, and default-mode round-robin onto CC fallback slots will silently corrupt the calls. Returns `'unknown-non-cc'` for that case so `buildCCRequest` flips to preserve-tools. Threshold reasoning:
+    - `len < 3`: too few tools to be confident; let the existing detector decide. Single-purpose bridges and partial loads land here.
+    - 80%: leaves room for a non-CC client that legitimately reuses 1–2 of `TOOL_MAP`'s `bash`/`grep`/`read` aliases. 100% would miss those; 50% would catch Cline forks that use 4 mapped + 4 custom (and Cline already has its own identity / protocol-signature path).
+
+  Unlike the identity-string detector, this catches future clients we haven't added an explicit pattern for (in-house agents, OpenClaw derivatives, etc.) without needing per-client maintenance.
+
+`--noAutoDetect` disables both paths so the operator's choice always wins. `--hybrid-tools` outranks auto-preserve as before — detector still reports the family for logging, but outbound tools get the CC remap so the hybrid reverse-path works.
+
+Test coverage: `test/client-detection.mjs` sections 10–11 — six unmapped → `unknown-non-cc`, 1-mapped+2-unmapped → null (below threshold), all-mapped (Cline-style) → null, identity match wins over structural for arnie's realistic (mostly-mapped) surface, `noAutoDetect` blocks both paths.
+
+### Added — `--log-file=PATH` for backgrounded proxy observability
+
+Append-only structured request log. One JSON-ND record per completed request, written to the path passed via `--log-file=<path>` or `DARIO_LOG_FILE`. Off by default. Solves a gap for backgrounded proxies where stdout is unobserved — `--verbose` only helps when you can watch the foreground.
+
+Field set kept narrow to stay grep-friendly and avoid leaking content. Fields: `ts`, `req`, `method`, `path`, `model`, `status`, `latency_ms`, `in_tokens`, `out_tokens`, `cache_read`, `cache_create`, `claim`, `bucket`, `account`, `client` (detected family), `preserve_tools` (effective, after auto-detect), `stream`, plus `reject` / `error` on rejection / failure. No request bodies, no tool args, no headers — those still go through `--verbose-bodies` / `DARIO_LOG_BODIES` (its own opt-in, foreground-only).
+
+Defense in depth: every line passes through `redactSecrets` (the same scrub `sanitizeError` and the OAuth-error path use). Write errors are swallowed inside `writeLogLine` so a log mishap can't break the request path. The stream is opened append-only, so multiple proxy restarts share a rolling history. Closes on SIGINT/SIGTERM.
+
+Hooked at five lifecycle points: auth reject (401), queue full (429), queue timeout (504), success completion (streaming + buffered), and the failure catch (client-closed, upstream timeout, proxy error). Test: `test/proxy-log-file.mjs`.
+
+## [3.31.21] - 2026-04-28
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.120` → `2.1.121` for CC v2.1.121. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the bundled template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally, amend this PR).
+
+## [3.31.20] - 2026-04-26
+
+Three landed PRs since v3.31.19, two of which (the template re-bake and the spam-watch workflow) carry user-visible changes — bundling as a patch release. The stealth #4 fix is a test-only change but rides along since it's already on master.
+
+- **#148** — bundled template re-captured against CC v2.1.120; `SUPPORTED_CC_RANGE.maxTested` 2.1.119 → 2.1.120. Pre-emptive: 2.1.120 is published to npm but not yet `@latest`-tagged. Anthropic tightened the `Agent` tool description in 2.1.120 (Explore now explicitly *not* for code review / cross-file consistency / open-ended analysis); shipping the new template ahead of the @latest promotion keeps users on the bundled fallback from drifting.
+- **#147** — stealth test #4 effort ratio softened to a diagnostic-only print. The hard `1.3x` assertion false-failed on every default-config install (proxy clamps `output_config.effort` to 'high' in default `--effort=high` mode, so both client values become identical upstream — the ratio is just stochastic noise). Plumbing already verified at the unit level by `test/effort-flag.mjs`.
+- **#146** — `.github/workflows/spam-watch.yml` auto-flags drive-by spam issues / PRs from external accounts on open. Five-signal scoring with threshold 2; members / collaborators / contributors short-circuit before scoring; flagged items get the `spam` label, an appeal comment, and a close (no auto-lock — keeps the appeal pathway open for false positives).
+
+### Changed — bundled template re-captured against CC v2.1.120; SUPPORTED_CC_RANGE.maxTested 2.1.119 → 2.1.120
+
+Pre-emptive bake against the next CC version. CC v2.1.120 has been published to npm (visible in the `versions[]` list) but is **not** tagged `latest` / `stable` / `next` — Anthropic is staging the rollout. The drift watcher tracks `@latest` and is correctly clean against 2.1.119. This re-bake gets the bundled fallback ahead of the eventual `@latest` promotion so users who upgrade past 2.1.119 don't sit on a stale template through the watcher's hourly window.
+
+**Captured with `node scripts/capture-and-bake.mjs`:**
+
+- `_version`: 2.1.119 → 2.1.120
+- `_captured`: 2026-04-26T12:59:53Z
+- Tool count unchanged (27 after MCP scrub from 33). Anthropic didn't add or remove tools in 2.1.120.
+- System-prompt size 12479 → 13382 chars (+903) — most of the delta is a tightened `Agent` tool description: the `Explore` sub-agent description in 2.1.120 explicitly calls out "do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window." Anthropic's signal: stop using Explore for things it isn't.
+- `user-agent` header: `claude-cli/2.1.119` → `claude-cli/2.1.120`.
+- Scrub audit clean: no host paths / cwd / email leaked into the baked template (verified post-capture: `home: clean / cwd: clean / email: clean`).
+
+`SUPPORTED_CC_RANGE.maxTested` bumped 2.1.119 → 2.1.120 in `src/live-fingerprint.ts` so the doctor's "untested-above" warn line drops for users on 2.1.120. No wire-shape regressions in the diff (tool definitions, body-field-order, anthropic-beta string all stable).
+
+### Fixed — stealth test #4 false-fails on default-config installs (dario#87 follow-up)
+
+`test/stealth-test.mjs`'s "Effort medium vs high" test asserted a hard `high.output_tokens / medium.output_tokens > 1.3x` ratio against a single complex-prompt sample. The assertion only makes sense when dario is started with `--effort=client` — in the default `--effort=high` mode (per dario#87) both client requests are rewritten to `effort: 'high'` before they leave dario, so the ratio is just stochastic variance between two identical-effort runs and the test false-fails on every vanilla install. Caught during a full e2e sweep against master.
+
+Effort-flag plumbing is already verified at the unit level by `test/effort-flag.mjs` (resolveEffort + buildCCRequest integration, all five valid values, client-passthrough, haiku carve-out, runs as part of `npm test`). What remained in stealth #4 was a live diagnostic — "given whatever proxy mode is running, how does the model respond to medium vs high?" — useful to eyeball when tuning effort behavior, not useful as a regression gate against stochastic single-sample model output.
+
+Replaced the hard assertion with a diagnostic-only block that prints the same comparison numbers (medium/high output tokens, thinking chars, ratio) but never fails the suite. The diagnostic doesn't pretend to interpret the ratio — the test can't observe the proxy's effort mode from black-box probing, so we just remind the reader that the ratio is meaningful only when dario is run with `--effort=client`. Test count drops from 11 to 10 in the stealth suite; nothing else changed.
+
+### CI — spam-watch auto-flags drive-by spam issues / PRs
+
+New `.github/workflows/spam-watch.yml`. Triggers on `issues.opened/reopened` and `pull_request_target.opened/reopened` — the `_target` variant gives fork PRs a write-capable token; safe here because we never check out PR code, only read the event payload + call the REST API.
+
+Members / collaborators / contributors short-circuit before any scoring (`author_association` exempt list). External accounts go through five signals: spam phrases (multi-word only — single tokens false-positive too often), suspicious link domains (`t.me`, `discord.gg`, `bit.ly`, …), emoji-heavy titles (< 20% alphabetic content), high spam-phrase density (3+), and empty body paired with another signal. Default threshold is 2 — a single hit is not enough, since each rule on its own has plausible legit overlap (a real issue can mention "airdrop" if the project is in that space).
+
+When flagged: adds `spam` label, posts an appeal comment linking back to the workflow run, then closes (issues with reason `not planned`, PRs via `gh pr close`). Does **not** auto-lock — locking removes a real person's appeal pathway in a false positive. The `spam` label gives maintainers a clean audit lane to manually lock genuine ones if drive-by follow-up comments accumulate.
+
+`workflow_dispatch` with a target number is a dry-run path for tuning rules against past items without waiting for organic spam. Same gh-CLI + inline-node shape as `cc-drift-watch.yml` — no new third-party actions to SHA-pin or dependabot-track. Threshold and rule list live at the top of the inline scorer so adjustments are a small PR, not a rewrite.
+
+## [3.31.19] - 2026-04-25
+
+### Fixed — silent CLI on every npm-global install (dario#143)
+
+**Critical regression introduced in v3.31.15.** Affects every user who installed dario globally via `npm install -g`. Symptom: every command (`dario doctor`, `dario proxy`, `dario --version`, all of them) prints **nothing** and exits 0. Reported by [@tetsuco in dario#143](https://github.com/askalf/dario/issues/143).
+
+**Root cause.** v3.31.15 (#137) added a main-entry guard so that test files importing `parsePositiveIntEnv` from `cli.js` wouldn't accidentally start the proxy:
+
+```ts
+// Pre-fix — silently broken on npm-global installs
+const isDirectEntry =
+  typeof process.argv[1] === 'string' &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+```
+
+That works when you invoke `node dist/cli.js` directly, but `npm install -g @askalf/dario` creates a bin shim at `/usr/local/bin/dario` (or `~/.local/bin/dario`, or homebrew's `/opt/homebrew/bin/dario`) that's a **symlink** to `dist/cli.js`. When the user runs `dario`, Node receives:
+
+- `process.argv[1]` = `/usr/local/bin/dario` (the symlink path)
+- `import.meta.url` = `file:///usr/local/lib/node_modules/@askalf/dario/dist/cli.js` (Node already resolved the symlink before evaluating the module)
+
+The strings didn't match → `isDirectEntry` returned false → the entire CLI body (Bun auto-relaunch + handler dispatch) got gated out → silent exit.
+
+The bug hid in the 4 releases between v3.31.15 and v3.31.18 because every test path runs `node test/*.mjs` directly, never through the bin shim, and dev runs of `node dist/cli.js doctor` skip the shim too. Local CI never installed the package globally.
+
+**Fix.** When the strict path compare fails, also resolve `argv[1]` through `realpathSync` and compare again. The symlink canonicalizes to the same on-disk path that `import.meta.url` already represents.
+
+```ts
+export function isMainEntry(argv1, moduleHref, realpath = realpathSync) {
+  if (typeof argv1 !== 'string' || argv1.length === 0) return false;
+  if (moduleHref === pathToFileURL(argv1).href) return true;
+  try { return moduleHref === pathToFileURL(realpath(argv1)).href; }
+  catch { return false; }
+}
+```
+
+Direct invocation matches via the first leg (no behavioral change). Symlinked global-install invocation matches via the second leg. Test-file imports of named exports still match neither leg, preserving the original guard purpose from #137.
+
+`isMainEntry` is now exported from `cli.js` as a pure helper so the contract is testable without a real symlink fixture.
+
+### Tests
+
+11 new assertions in `test/main-entry-guard.mjs`:
+
+- Direct invocation (no symlink) → true
+- Symlink invocation across three install layouts (`/usr/local/bin`, homebrew `/opt/homebrew/bin`, Linux `~/.local/bin`) → true
+- Library import (unrelated argv[1]) → false in three shapes (test runner, node binary, different bin shim)
+- Edge cases: undefined / null / empty argv[1] → false
+- `realpath` throws (ENOENT, etc.) → caught, returns false (must not crash the CLI on broken installs)
+
+54 total (up from 53). Full suite green.
+
+### Apology
+
+This shipped because every layer of validation we have runs against `node dist/cli.js`, never against the installed bin shim. PR #137 added the guard with thorough unit tests; PRs #138–#142 layered features on top; v3.31.18 went out the door yesterday with `npm publish --provenance` perfectly intact, every test green, and a completely-broken end-user CLI. The post-merge "manual smoke test against the installed binary" step we always skipped because it was inconvenient is what would have caught it. Adding it to the release checklist.
+
+Sorry for the breakage on what was supposed to be a feature release. Anyone on v3.31.15 through v3.31.18 should `npm install -g @askalf/dario@latest` once this is published.
+
+## [3.31.18] - 2026-04-25
+
+### Added — `dario doctor --usage` surfaces per-model rate-limit buckets
+
+Follow-up to v3.31.17's per-model parser: `dario doctor` can now display the same "All models / Sonnet only / Opus only" split the user dashboard shows on the claude.ai usage page. Opt-in via `--usage`; costs ~3 `max_tokens=1` subscription requests per run (negligible 5h/7d burn).
+
+Smart routing — the probe auto-detects whether a `dario proxy` is reachable on `DARIO_TEST_URL` (default `http://127.0.0.1:3456`) via a 800ms health check:
+
+- **Proxy reachable** → probes route through it. The CC-template injection happens on the outbound path, so Sonnet/Opus requests are accepted on subscription and return their per-model bucket headers (`7d_sonnet-utilization`, eventually `7d_opus`/`7d_haiku`). All three families probed in parallel; per-model rows merged from whichever probe emitted which bucket.
+- **Proxy not running** → probes go direct to `api.anthropic.com`. Raw non-CC-shaped Sonnet/Opus requests are rejected on subscription (429 with no rate-limit headers — subscription path requires the full CC wire shape), so only Haiku answers. Doctor still surfaces unified 5h/7d in that case, plus an info row: *"dario proxy not running — per-model buckets visible only when probing through a running proxy."*
+
+Divergence marker: when a per-model bucket differs from unified 7d by more than 5pp, the row shows `Δ vs 7d(all): +X.Xpp` so a "Sonnet-only line is ahead of All models" situation is immediately visible.
+
+Example output (against a live subscription, with the proxy running):
+
+```
+[ OK ]  Usage 5h (all)          33.0% used  •  status=allowed  •  claim=five_hour (subscription)
+[ OK ]  Usage 7d (all)          17.0% used
+[ OK ]  Usage 7d (sonnet only)  0.0% used  •  Δ vs 7d(all): -17.0pp
+```
+
+Any bucket at ≥90% utilization flips the row to `[WARN]`, propagating to doctor's exit code.
+
+### Investigation — Sonnet 4.6 reports 2× the `output_tokens` of Opus for the same prompt (not a bug)
+
+The stress-run that surfaced #141 also flagged an apparent discrepancy: with `max_tokens=8` and a trivial `"OK?"` prompt, Sonnet 4.6's `usage.output_tokens` was 295 median while Opus 4.7's was 139. Investigation traced two compounding factors:
+
+1. **`src/cc-template.ts:1131-1132`** injects `thinking: { type: 'adaptive' }` for every non-Haiku model. Opus and Sonnet both get adaptive thinking enabled by default; Haiku does not.
+2. **`resolveMaxTokens` pins outbound `max_tokens` to `DEFAULT_MAX_TOKENS=32000`** when the client's value isn't explicitly passed through (`--max-tokens=client` opts in). The probe sent `max_tokens=8` client-side but dario rewrote to 32000 outbound, giving the adaptive thinking budget room.
+
+Result: Sonnet spent ~287 thinking tokens before emitting ~8 visible tokens = 295 total `output_tokens`. Opus 4.7 spent ~131. **Pure model behavior** — Sonnet thinks more on simple prompts than Opus 4.7 does — not a dario analytics issue. `Analytics.parseUsage` already tracks `thinkingTokens` separately (derived from `content[].thinking` text length) so per-model displays can show the visible-vs-thinking split explicitly.
+
+Users who want `max_tokens` honored verbatim (and therefore thinking constrained within it): pass `--max-tokens=client` to `dario proxy`. The DEFAULT_MAX_TOKENS pin is intentional — matches CC's wire value and keeps subscription billing on the happy path; raising or lowering it per-user via the flag is documented.
+
+## [3.31.17] - 2026-04-25
+
+### Fixed — pool routing now considers Anthropic's per-model weekly buckets
+
+Anthropic started carving the Max plan's weekly window into per-model sub-buckets sometime around 2026-04-25. Currently observed:
+
+- The unified `7d` bucket still exists (the "All models" line on the user dashboard)
+- A **new dedicated `7d_sonnet` bucket** ships on Sonnet responses only — corresponds to the "Sonnet only" usage line on the dashboard, currently independent from `7d`
+- Opus 4.6 / Opus 4.7 / Haiku 4.5 do not yet have dedicated headers; they're still entirely on the unified buckets
+
+This was found by stress-probing Opus 4.7 + Sonnet 4.6 against dario in production (see [v0 stress run findings — Opus 4.7 currently 1.85× faster than Sonnet 4.6 through dario](https://github.com/askalf/dario/discussions)). The new bucket is on the wire with no documentation that I can find.
+
+**Routing impact before this fix:** dario's `select()` and `selectExcluding()` computed headroom as `1 - max(util5h, util7d)` and ignored the per-model bucket entirely. Once Anthropic starts enforcing the Sonnet bucket, the pool would have happily routed Sonnet requests to an account at 95% on its `7d_sonnet` window because that account looked great on the unified `7d` bucket. Account would 429, dario would failover, but the picker would have made the same wrong call again until enough accounts got rejected.
+
+**Now:**
+
+- `parseRateLimits` scans the full header set with the regex `^anthropic-ratelimit-unified-7d_([a-z0-9-]+)-utilization$`, capturing every per-model bucket Anthropic emits — `_sonnet` today, `_opus` / `_haiku` if/when they ship, no allowlist gate. Lowercase-normalized keys.
+- New `RateLimitSnapshot.perModel7d: Record<string, number>` field stores the captured buckets per account; `EMPTY_SNAPSHOT` initialized with `{}`.
+- New `computeHeadroom(snapshot, family?)` helper folds the per-model bucket into the headroom max when a request's family matches a captured key. Falls back to unified-only headroom when family is null or no matching bucket exists. Replaces ~6 inline `1 - Math.max(util5h, util7d)` sites across `pool.ts`.
+- New `modelFamily(modelId)` helper extracts `opus` / `sonnet` / `haiku` from request model ids — handles `claude-opus-4-7`, `opus`, legacy `claude-3-7-sonnet-…`, lowercase / uppercase, alias / full-id forms.
+- `select()`, `selectSticky()`, `selectExcluding()` now take an optional `family` parameter. `proxy.ts` threads the request's family through at all four call sites (`selectSticky` for the sticky pick, both `selectExcluding` sites for 429 failover). The initial `pool.select()` at request-receive time stays family-less because the body hasn't been parsed yet — same behavior as before this PR for that pre-parse pick.
+- New first-sight detector in `proxy.ts`: when verbose mode encounters a per-model bucket family it hasn't seen this run, log `[dario] new per-model rate-limit bucket observed: 7d_<family>`. Catches future Anthropic rollouts the day they ship instead of the day they start failing routing.
+
+26 new assertions in `test/per-model-buckets.mjs` covering: parser captures `_sonnet` (live header today), parser captures hypothetical `_opus`/`_haiku` (forward-compat), case-insensitive family normalization, headroom unified-only fallback when family not supplied, headroom folds in per-model bucket when family matches, headroom unified-only when family present but no matching bucket, `select(family)` flips routing when one account is sonnet-saturated, `select(family)` partial-signal correctness when only one account has per-model data, `modelFamily` extraction across alias / full-id / legacy / case / non-Claude forms.
+
+Forward-compat by design: if Anthropic ships `7d_opus` next week, dario's parser captures it, the routing decision uses it for Opus requests, and verbose-mode users get a heads-up log on first observation. No code change needed when a new bucket appears.
+
+`test/infra-probe.mjs` (the one-off investigation script that found this) is excluded from the default `npm test` run via the same `EXCLUDED` set as `e2e` / `stress` / `compat`. Kept in the tree as a diagnostic artifact for future Anthropic-changed-something investigations.
+
+53 tests total (up from 50 + 2 from #139).
+
+## [3.31.16] - 2026-04-24
+
+### Security — defense-in-depth hardening pass (no known active exploit)
+
+A self-audit found two patterns worth tightening even though neither is reachable in the documented threat model (local user trusted, Anthropic mostly trusted, concern is malicious websites + supply-chain). Both fixes are byte-equivalent for legitimate inputs; the change is rejecting the unsafe inputs they should never have been able to reach in the first place.
+
+**1. Browser open path no longer goes through the shell.**
+
+`src/oauth.ts` and `src/accounts.ts` previously used `child_process.exec` with template-string interpolation to dispatch a URL to the OS's URL handler:
+
+```ts
+exec(`start "" "${authUrl}"`, () => {});       // win32
+exec(`open "${authUrl}"`, () => {});           // darwin
+exec(`xdg-open "${authUrl}"`, () => {});       // linux
+```
+
+If a `DARIO_OAUTH_AUTHORIZE_URL` override or a future code path ever surfaced a URL containing `&`, `|`, `^`, `$()`, backtick, or other shell metacharacters, those would have executed under the user's shell. Replaced with a new `src/open-browser.ts` helper that:
+
+- Validates the URL with WHATWG `URL` (rejects malformed input),
+- Allowlists `http:` / `https:` only (rejects `file:`, `javascript:`, `data:`, `vbscript:`, custom schemes),
+- Spawns the platform-specific URL handler (`explorer.exe` / `open` / `xdg-open`) via `execFile` with the URL as a single argv element — no shell, no template interpolation. Windows uses `explorer.exe` instead of `cmd /c start "" "URL"` so cmd's parser never sees the URL even after Node's argv-quoting.
+
+The `openBrowser` import is now also used at the original call sites in `accounts.ts` and `oauth.ts`. Both call sites wrap in `try {} catch {}` because every caller already prints the URL for manual paste — a failed browser-open is non-fatal.
+
+**2. Upstream error response bodies no longer reach `Error.message` raw.**
+
+`accounts.ts:doRefreshAccountToken`, `accounts.ts:addAccountViaOAuth`, `oauth.ts:doExchangeToken`, and `oauth.ts:doRefreshTokens` all sliced the upstream response body into a thrown `Error.message`:
+
+```ts
+throw new Error(`Refresh failed (${res.status}): ${errBody.slice(0, 200)}`);
+```
+
+Anthropic's documented API is not known to echo tokens in error responses, but defense-in-depth: a future API change, an intermediary's debug page, or a CDN error template that captures request headers could surface a token, and we'd rather redact in transit than audit every call site. Extracted the redaction patterns from `proxy.ts:sanitizeError` into a shared `src/redact.ts` module (`SECRET_PATTERNS` + `redactSecrets`) and applied it to all four upstream-body sites. Patterns cover `sk-ant-…` API keys, JWT triples (`eyJhdr.eyJpld.sig`), and `Bearer …` headers. Idempotent — running redaction over an already-redacted string is a no-op.
+
+`proxy.ts:sanitizeError` is now a one-liner over `redactSecrets`; behavior is identical.
+
+### Tests
+
+- `test/open-browser.mjs` (25 assertions) — pins protocol allowlist, malformed URL rejection, per-platform binary selection, shell-metacharacter URLs preserved as a single argv element (the whole point), and the `exec` stub path so the integration of validate + spawn is covered without touching the real OS.
+- `test/redact.mjs` (19 assertions) — redaction of `sk-ant-`, JWTs, `Bearer …`; multi-secret strings; idempotency; preservation of non-secret content; `SECRET_PATTERNS` export shape.
+
+**52 tests total, up from 50.**
+
+## [3.31.15] - 2026-04-24
+
+### Fixed — `cli.ts` import now side-effect-free (uncovered while chasing a pre-existing request-queue test flake)
+
+Importing `dist/cli.js` (e.g. `import { parsePositiveIntEnv } from '../dist/cli.js'` from the request-queue test) used to auto-run the CLI — read `process.argv`, default `command = 'proxy'`, invoke `startProxy()` — because the Bun auto-relaunch block and handler dispatch ran at module top level. In the test, this triggered proxy startup → "Not authenticated" → `process.exit(1)` racing the test and killing the subprocess. The flake was hiding the fact that `cli.ts` wasn't safe to import at all — any library consumer or future programmatic use of `startProxy` / `getStatus` from a caller that also wanted a helper from `cli.ts` would have hit the same implicit side effect.
+
+Both side effects (Bun auto-relaunch, handler dispatch) are now gated behind a `import.meta.url === pathToFileURL(process.argv[1]).href` main-entry check. When dario runs as the entry point, behavior is identical. When imported as a module, neither side effect fires.
+
+### Fixed — `RequestQueue` timeout fires under test conditions (`unrefTimers` option added)
+
+Only surfaced after the `cli.ts` fix above — the CLI-import side effect was exiting the test subprocess before it ever reached the timeout section. `RequestQueue#acquire` was calling `timeoutHandle.unref?.()` unconditionally. Production-correct (a leaked queue entry shouldn't by itself pin the proxy alive on shutdown), but breaks the queue-timeout test: when the queue is the only pending work on the event loop, an unref'd timer lets Node exit *before* the timeout fires, so the expected reject never arrives and the test hangs on top-level await.
+
+New `unrefTimers` option on `RequestQueueOptions`, default `true` (preserves existing production behavior). The one test case that hits the queue-timeout path now passes `unrefTimers: false` so the timer keeps the loop alive long enough for the 50ms timeout to fire. Full 50-test suite now passes cleanly under `node --test` — the pre-existing `request-queue.mjs` flake is gone.
+
+## [3.31.14] - 2026-04-24
+
+### Fixed — OAuth `state` length at the remaining four call sites (dario#71 completion)
+
+v3.31.12 fixed the `state` parameter length (16 → 32 random bytes → 43-char base64url) that Anthropic's `claude.ai/oauth/authorize` endpoint started requiring, but only in `src/accounts.ts` (the `dario accounts add` path). Four other call sites were still generating 22-char states that the same endpoint now rejects with "Invalid request format":
+
+- `src/oauth.ts:startAutoOAuthFlow` — the `dario login` browser flow. Any user without existing Claude Code credentials to shortcut to would have hit the same rejection tetsuco reported in #71. The reason this didn't surface earlier: tetsuco's own `dario login` shortcutted to his pre-existing `claude auth login` session, so his fresh `dario login` never actually ran the OAuth flow.
+- `src/oauth.ts:startManualOAuthFlow` — the `--manual` SSH / headless / container variant. Same rejection, same reason.
+- `src/cc-authorize-probe.ts:buildProbeAuthorizeUrl` — the in-process drift-check probe. With a 22-char state the probe now always receives "Invalid request format" from Anthropic, so `doctor --probe` and drift-watch were reporting false drift regardless of actual upstream state.
+- `scripts/check-cc-authorize-probe.mjs` + `scripts/check-cc-authorize-probe-headless.mjs` — standalone probe scripts used by `cc-drift-watch.yml`. Same false-positive pattern.
+
+All five now use `randomBytes(32)` with an inline comment pointing at #71 as the rationale so the next refactor doesn't accidentally revert. `src/accounts.ts` (already 32 since v3.31.12) is unchanged.
+
+### Added — grep-based invariant test pinning `randomBytes(32)` at every OAuth state call site
+
+New `test/oauth-state-length.mjs`, modeled on `scope-binary-verify.mjs`. Walks `src/` + `scripts/`, regex-scans for `state` assignments that call `randomBytes(N)`, asserts N === 32 at every hit. 6 call sites pinned across 4 files; 7 assertions total (6 per-call-site + 1 "regex still matches at least 4 sites" meta-assertion catching a regex drift / deletion). If a future refactor reverts any call site to `randomBytes(16)` — or introduces a new one at the wrong size — the test fails loudly before the change can land.
+
+### Fixed — `dario accounts add` now back-fills the `dario login` account into the pool (dario#71 follow-up)
+
+Pool mode activation threshold is "2+ accounts in `~/.dario/accounts/`". Single-account `dario login` credentials live separately at `~/.dario/credentials.json` (plus the CC file + OS keychain fallbacks in `oauth.ts`) and were never migrated into the pool. Practical consequence: a user running `dario login` then `dario accounts add bar` ended up with one account in `accounts/` (`bar`), still-below-threshold, pool mode off, and the original login account orphaned from the pool until they figured out they had to re-`accounts add` it under a second alias. Surfaced by [@tetsuco](https://github.com/askalf/dario/issues/71) at the end of the #71 thread.
+
+New helper `ensureLoginCredentialsInPool(alias = 'login')` in `src/accounts.ts`:
+
+- No-op when `accounts/` is non-empty (idempotent — won't stomp existing pool state).
+- No-op when no credentials are reachable anywhere (`loadCredentials()` covers `~/.dario/credentials.json`, `~/.claude/.credentials.json`, and the OS keychain).
+- Otherwise, writes `accounts/<alias>.json` with the tokens + scopes from the credentials file and identity (`deviceId` / `accountUuid`) from `detectClaudeIdentity()` — the same source single-account mode already uses, so the migrated account's wire-identity matches what `dario login` was sending.
+- Never destructive. `credentials.json` (if present) is left untouched, so if the user later drops below the 2+ threshold via `dario accounts remove`, single-account mode falls back to it cleanly.
+
+Wired into the CLI on the first `dario accounts add`: runs the back-fill (with user-visible message) before kicking off the OAuth flow for the new alias, so the second `add` actually trips the 2+ threshold on its own. Skipped when the user explicitly picks `login` as their `add` alias — their intent wins, no silent alias swap.
+
+No routing changes. The pool's `add()` accepts the migrated `PoolAccount` entry as a first-class member — weighted headroom routing, session stickiness, in-flight 429 failover, and per-account background refresh all key off `Map<alias, PoolAccount>` without caring about provenance.
+
+17 new assertions in `test/ensure-login-in-pool.mjs` covering: no-creds null path, happy-path migration (token + scope + identity shape), idempotency on re-call, skip when accounts/ is pre-populated, and safe-alias rejection on traversal input. Isolation via HOME/USERPROFILE temp-dir override so the test never touches the real user's `~/.dario`. 49 tests total (up from 48).
+
+## [3.31.13] - 2026-04-24
+
+### Template — re-captured against live CC v2.1.119 (dario#129)
+
+Bundled `src/cc-template-data.json` was baked against CC v2.1.118; nightly drift watcher flagged v2.1.119 on 2026-04-23. Re-ran `scripts/capture-and-bake.mjs` against live CC v2.1.119.
+
+What changed upstream: Anthropic updated the `Monitor` tool's description — added a new "Pick by how many notifications you need" guidance section distinguishing single-notification (Bash `run_in_background` + `until` loop) from per-occurrence (Monitor with `tail -f` etc.) use cases, and gained warnings about using unbounded commands for one-shot waits. Tool count unchanged (27 after scrubbing), system-prompt length unchanged after scrubbing (12479 chars), schema v3.
+
+No runtime behavior change for users. The bundled fallback now matches what a user on CC v2.1.119 sees when they run without a live-capture cache. Live-capture path (dominant mode for users with CC installed) was already picking up v2.1.119 automatically — this release just catches the shipped fallback up so users without a local CC see the latest shape too.
+
+## [3.31.12] - 2026-04-24
+
+### CI — actionlint runs on every PR (no path filter)
+
+Drops the `paths:` filter from `actionlint.yml`'s triggers. `actionlint` is in master's required-status-checks list; path-filtered required checks can never report on PRs outside the filter — they sit as permanently-pending and block merge. Caught in practice on PR #130 (src-only OAuth fix) which went to indefinite BLOCK until this was fixed on the branch. Same fix shipped earlier on claude-bridge + deepdive; dario kept the old path-filter until now.
+
+### Fixed — `dario accounts add` "Invalid request format" (dario#71)
+
+Anthropic's `claude.ai/oauth/authorize` endpoint started rejecting OAuth `state` parameters shorter than what CC generates. Dario shipped `base64url(randomBytes(16))` = 22 chars; CC v2.1.116+ ships `base64url(randomBytes(32))` = 43 chars. Same `client_id`, same scopes, same PKCE, same `redirect_uri`, same parameter order — the only delta between a working CC `/login` URL and a rejected dario URL was `state` length. RFC 6749 only requires `state` to be "non-guessable" and 128 bits of entropy (16 bytes) IS non-guessable, so shorter is spec-compliant, but Anthropic got stricter than spec here.
+
+One-line fix in `src/accounts.ts`: `randomBytes(16)` → `randomBytes(32)`. Kept in lockstep with CC's entropy-per-state.
+
+Why this took three tries to close. v3.31.3 (URL normalizer) and v3.31.4 (6-scope restore) were both real drift items — dario was separately wrong on those — but neither was *this* issue's root cause. Each fix was driven by code review + tetsuco's captured data, but the URL samples shared had `state=xxx` redacted (correctly — state is random per-flow, sharing looks safe to redact), so the length delta was invisible across the first two rounds. It only surfaced once we ran `dario accounts add` end-to-end on a fresh account on our side and compared an unredacted live URL against CC's `/login` URL. Moral: for OAuth flow bugs like this, redacting `state`/`code_challenge` hides the very delta that diagnoses the break. Running the flow ourselves was the intervention that mattered.
+
+Thanks to [@tetsuco](https://github.com/tetsuco) for the patience through three release rounds and for suggesting we reproduce locally on the last round — that's what turned this from guess-and-ship to a one-line certain fix.
+
+### CI — auto-release publishes to npm inline (GITHUB_TOKEN can't fire downstream)
+
+Same class of bug that deepdive just hit with v0.3.0 and that would have bitten dario on the first bot-drift PR merge that exercised the generalized `cc-drift-auto-release.yml` (PR #127): `gh release create` uses `GITHUB_TOKEN`, and GitHub intentionally doesn't fire workflows for events created by `GITHUB_TOKEN` (loop protection). So the `release:published` trigger on `publish.yml` never fires from an auto-created release, and the package doesn't ship.
+
+Worked on dario so far only because every release to date was a manual `gh release create` by the maintainer (human-token events do trigger downstream workflows). The automated path was latent and untested.
+
+Fix mirrors deepdive: inline the build + smoke + `npm publish` steps into `cc-drift-auto-release.yml` itself. Chain is now a single run: PR merge → build → smoke → `gh release create` → `npm publish --access public --provenance`. `publish.yml` stays in place for the manual-release case. Added `id-token: write` to the workflow permissions for SLSA provenance.
+
+Next drift-bot PR merge (or any manually-merged version bump) will exercise the full chain without a maintainer touchpoint.
+
+### CI — auto-release triggers on any version bump, not just bot PRs
+
+Root-cause fix for the v3.31.8–v3.31.11 release gap: four manually-merged feature PRs bumped `package.json` version but never reached npm, because `cc-drift-auto-release.yml`'s trigger was gated on `startsWith(head.ref, 'bot/cc-drift-')`. Manual PRs missed the release pipeline entirely; the CHANGELOG claimed those versions existed, npm disagreed.
+
+- Removed the `startsWith('bot/cc-drift-')` gate from the job-level `if:`. Every merged PR to master now runs the workflow.
+- First step compares `package.json.version` between HEAD and HEAD^1. Unchanged → `changed=false`, workflow short-circuits in ~10s (cheap no-op for non-release merges). Malformed (non-X.Y.Z) → abort loudly. Bumped cleanly → proceed.
+- All downstream steps gated by `if: steps.ver.outputs.changed == 'true'`.
+- "Close matching cc-drift issues" step further gated on `startsWith(head.ref, 'bot/cc-drift-')` — manual feature PRs skip it (no bot-tracked issues to close).
+- Release title dropped the hard-coded "CC drift patch" suffix; uses just the tag name.
+- Post-release summary's "cc-drift issues closed" line prints only when the merged branch actually was a bot-drift one.
+- Workflow display name changed from "CC drift auto-release" to "Auto release on version bump". Filename kept (`cc-drift-auto-release.yml`) for git-blame continuity; history comment explains the scope expansion.
+
+Net effect: next merged PR that bumps `package.json` version ships to npm within ~3 minutes, no maintainer touchpoint beyond the merge. Applies to both bot-drift PRs (unchanged behavior, just wider pattern) and manual feature PRs (new behavior, closes the gap).
+
+### CI — Dependabot version updates + actionlint workflow
+
+Two additions to the CI hygiene layer, orthogonal to any runtime change:
+
+1. **`.github/dependabot.yml`** — weekly (Monday 09:00 UTC) version-update PRs for npm and github-actions ecosystems. Non-major updates (minor + patch) grouped into a single PR per ecosystem to keep noise down; majors still open individually so they get real review. Security-advisory updates are unchanged — already on via the repo-level Dependabot security-updates setting, independent of this config.
+
+2. **`.github/workflows/actionlint.yml`** — `actionlint` v1.7.1 runs on any PR that touches `.github/workflows/**` and on pushes to master touching the same paths. Statically catches the class of workflow-YAML bugs we've hit at fire time (wrong interpolation shape, bad `needs:` refs, shell-quoting, etc.). Not required for merge yet; promote to a required status check after one cycle of verifying no false positives on the existing workflow set.
+
+First-run findings, fixed in this PR: **script-injection risk** via inline `${{ github.event.pull_request.head.ref }}` interpolation in two `cc-drift-auto-release.yml` steps (a PR branch named `bot/cc-drift-v1.0.0$(…)` would have passed the `startsWith()` guard and parsed at shell-eval time), plus one unquoted `$(dirname …)` in `cc-drift-watch.yml`'s version gate. The branch-name injection was introduced in #116 and caught within the hour — exactly the motivating case for adding this check.
+
+### CI — operational hygiene: auto-close cc-drift issues, OAuth issue template, stale bot
+
+Three small additions that tighten how the repo handles its own lifecycle, orthogonal to the release / drift loop itself:
+
+1. `.github/workflows/cc-drift-auto-release.yml` gains a "Close matching cc-drift issues" step. The nightly watcher opens `cc-drift`-labeled issues when it detects drift; this step closes any still-open ones after the matching release ships (matches both `CC drift detected: v<cc>` and `CC authorize-probe drift: v<cc>` title shapes). Idempotent — closing an already-closed issue is a no-op. Previously each drift patch required a manual issue sweep.
+
+2. New `.github/ISSUE_TEMPLATE/oauth-auth-issue.yml` — GitHub issue form for the auth-bug class (`dario#42`/`#71` OAuth scope drift, `dario#97` client-side auth header mismatch). Pre-requests `dario doctor --probe` and `dario doctor --auth-check` output in `render: shell` textareas, so triage data lands in the initial post rather than a back-and-forth. Redaction is handled by doctor's own `redactSecret` / `scrubPath`.
+
+3. New `.github/workflows/stale.yml` — `actions/stale@v9`, once daily at 04:30 UTC. 60 days to warn, 14 more to close. Exempts `cc-drift` (closes automatically on release via the step above), `review-feedback`, `help-wanted`, `good-first-issue`, `pinned`, plus `wip`/`blocked` for PRs. `remove-stale-when-updated: true` — a comment within the window resets the clock. Conservative `operations-per-run: 60` so first activation can't mass-close a backlog.
+
+Repo settings also tightened out-of-band (not in this PR, applied via `gh api`): `pinned` / `wip` / `blocked` / `auth` labels created (referenced by stale exempts + the auth issue template), and `required_conversation_resolution` enabled on master protection so unresolved PR review threads now block merge.
+
+### CI — auto-release on `bot/cc-drift-*` PR merge
+
+Tightens the drift loop from "bot opens PR → maintainer merges → maintainer manually tags + releases" to "bot opens PR → maintainer merges → npm publish fires within ~3 minutes, no further action."
+
+Two changes in this PR:
+
+1. The **auto-drafter** (`scripts/auto-draft-drift-fix.mjs`) now also bumps `package.json` patch version, promotes `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD` with a fresh `## [Unreleased]` above, and lands the drift-fix bullet under the new dated heading. Everything a human would otherwise hand-edit at release-prep time.
+
+2. A **new workflow**, `.github/workflows/cc-drift-auto-release.yml`, fires on `pull_request.closed` to `master` when the head branch starts with `bot/cc-drift-` AND `merged == true`. It reads `package.json` from post-merge master, guards against duplicate tags, extracts the matching CHANGELOG section for release notes, and creates the GitHub release. `publish.yml` then fires on `release.published` and runs `npm publish --provenance`.
+
+Three stacked guards on the trigger so nothing unexpected can release:
+- `pull_request.closed` event type
+- `merged == true` (rules out close-without-merge)
+- Head branch prefix `bot/cc-drift-` (rules out any non-bot PR)
+
+New library exports in `scripts/_drift-patch-helpers.mjs`: `bumpPatch(version)`, `bumpPackageJsonPatch(jsonString)`, `promoteUnreleased(changelog, version, date)`, plus `appendUnreleased` gained an optional `heading` parameter (accepts string or regex) so the auto-drafter can append bullets under a specific version heading, not just `## [Unreleased]`.
+
+Tests: 25 new assertions in `test/auto-draft-drift-fix.mjs` — `bumpPatch` across normal / large / 2-segment inputs plus malformed-input rejection; `bumpPackageJsonPatch` round-trip preserving other fields; `promoteUnreleased` heading order invariants; `appendUnreleased` with custom heading regex. 54 total on the drift-patch helpers, 48/48 full suite.
+
+End-to-end on the maintainer's dev machine: one synthetic drift report produces correct one-line patch, correct package.json bump, correct CHANGELOG promotion with bullet placement. Reverted the dry-run before committing.
+
+### CI — auto-draft PR on `compat.range` drift
+
+When `scripts/check-cc-drift.mjs` flags a `compat.range` item (the "CC v2.1.X is beyond `SUPPORTED_CC_RANGE.maxTested` (v2.1.X-1)" class that landed the last four CC-drift patches — v3.31.1 / v3.31.4 / v3.31.5 / v3.31.11), the drift watcher now auto-opens a draft PR with the one-line fix already applied. Previously it only opened an issue; a maintainer then had to hand-write the same trivial patch.
+
+- New `scripts/auto-draft-drift-fix.mjs` reads `drift-report.json`, identifies the `compat.range` item, patches `SUPPORTED_CC_RANGE.maxTested` in `src/live-fingerprint.ts`, appends a bullet under `## [Unreleased]` in `CHANGELOG.md`, and emits PR metadata.
+- Workflow commits the patch, pushes to `bot/cc-drift-v<version>`, opens a draft PR with a maintainer-checklist body (install new CC, run doctor, re-capture template if fingerprint-sensitive fields changed, version bump + merge).
+- Draft state is deliberate: the bot can't evaluate whether the bundled template needs re-capture, so the maintainer gatekeeps. Other drift categories (template re-capture, scope rotations, URL/clientId/tokenUrl changes) are excluded from auto-drafting and still just open the plain issue.
+- `permissions` block on the workflow gains `contents: write` + `pull-requests: write` so the bot can push its branch + open the PR. Master's branch protection is unchanged — the bot pushes to `bot/*` only, and merges still go through the PR UI.
+- 29 assertions in `test/auto-draft-drift-fix.mjs` pin the pure helpers: `isOlderThan` semver-ish comparison, `patchMaxTested` (single/double-quote style, refuse-to-move-backward guard, stale-report tolerance), `appendUnreleased` (including the HTML-comment false-match regression caught in dev).
+
+Completes the watcher-hardening arc started in PR #112 (headless Chromium probe) and PR #113 (hourly cadence + npm-version gate). Detection latency is now 0–1h; fix latency for the most common drift class drops from "file issue, wait for maintainer to hand-write the patch" to "review auto-drafted PR + merge."
+
+
+- **CC drift patch** — `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.118` → `2.1.119` for CC v2.1.119. Auto-drafted by `cc-drift-watch.yml`; maintainer confirm the template doesn't also need a re-capture (run `node scripts/capture-and-bake.mjs` locally).
+### CI — drift watcher cadence: daily → hourly, with npm-version gate
+
+The drift watcher previously ran nightly at `02:00 UTC`. That's a 0–24h latency between a CC release landing on npm and dario noticing. Users who upgraded CC in that window hit drift before the watcher flagged it.
+
+New cadence: cron runs every hour (`0 * * * *`). A lightweight `version_check` gate job runs first — one HTTP GET to npm's registry for `@anthropic-ai/claude-code@latest`, a cache lookup keyed on that version. The heavyweight `check` job only fires when the version has changed (cache miss) or `workflow_dispatch` input `force=true`. Cache key is the version string itself, so the sentinel persists across hourly runs until Anthropic publishes a new version.
+
+Cost: ~24 cheap gate runs/day (~5–10s each on GHA) + one full run per CC release. Less total work than the old nightly because the nightly did the full tarball-download + binary-scan + template-extraction every run regardless of whether anything changed.
+
+Detection-latency impact: the recent `#42 → #71` cadence (two drift incidents in 8 days) would have had its window cut from 0–24h to 0–1h.
+
+### CI — headless-Chromium authorize probe unblocks the nightly drift watcher
+
+The existing `scripts/check-cc-authorize-probe.mjs` is blocked by Cloudflare's bot challenge from GitHub Actions IPs — the probe's own docstring admits "the probe is most useful when a maintainer runs it locally after the binary-scan watcher flags scope drift." That isn't preventative; by the time the maintainer runs it, a user has already hit the drift.
+
+New `scripts/check-cc-authorize-probe-headless.mjs` performs the same two-variant probe (A = pinned 6-scope, B = 5-scope with `org:create_api_key` removed, same assertion shape + JSON report envelope) but through a Playwright-managed headless Chromium. Real browser TLS passes CF's JavaScript challenge, so CI runs now return `accepted`/`rejected` instead of `inconclusive`.
+
+Workflow changes in `.github/workflows/cc-drift-watch.yml`:
+- New step installs `playwright@1.49.0 + chromium` ad-hoc before the probe step. Not added to dario's `package.json` — preserves the zero-runtime-dependency policy; Playwright is a CI-only artifact.
+- Primary probe step now runs the headless variant.
+- Fallback step runs the fetch-based probe only if headless exits with code 2 (Playwright unavailable) — so if Chromium install breaks in CI, we degrade to the previous behaviour rather than silently skipping the probe.
+
+Closes the gap flagged as review item #1: the single reliable signal for the `#42`/`#71` class of drift is now actually usable from CI, not just from an operator's laptop. `dario doctor --probe` (shipped in v3.31.7) stays the fetch-based operator-side path.
+
+## [3.31.11] - 2026-04-23
+
+### Added — partial scope auto-detection via binary-literal scan
+
+`scanBinaryForOAuthConfig` now verifies each FALLBACK scope against CC's binary by searching for the scope's quoted-literal form (`"org:create_api_key"`, etc.). If a scope literal is MISSING from the binary, it's dropped from the returned config — dario will no longer send a scope CC no longer ships. Silent when all 6 are present (the common case); only filters when the binary has drifted.
+
+**What this catches:** the class of drift where Anthropic deprecates a scope and CC's next release ships without the literal. Today dario would keep sending the stale scope until a user hit the "Invalid request format" page (same class as dario#42, #71) and filed an issue. Now it self-heals on startup as soon as the user upgrades CC.
+
+**What this does NOT catch:** the opposite direction — Anthropic starts accepting a NEW scope we don't know about. Adding requires server-side confirmation; the binary-literal scan can't verify that. That direction still needs the live probe (`dario doctor --probe` or the nightly `scripts/check-cc-authorize-probe.mjs`).
+
+Detection is defense-in-depth, not a replacement for the probe. FALLBACK.scopes remains the ground truth; verification just filters, never adds.
+
+New export: `filterScopesByBinaryPresence(buf, expected)` — pure, safe to unit-test. 11 new assertions in `test/scope-binary-verify.mjs` covering all-present / subset / missing-org-create / empty / substring false-positive / empty-expected / single-quote-guard cases.
+
+## [3.31.10] - 2026-04-23
+
+### Added — `dario config`
+
+Prints the effective dario configuration with credentials redacted. Different intent from `dario doctor`: doctor is "is it working?", config is "what IS it?". Complementary rather than redundant — you paste doctor when debugging a routing failure, you paste config when debugging a port / host / auth / pool misconfiguration.
+
+Sections printed:
+- **Identity** — version + runtime
+- **Proxy (on `dario proxy`)** — port, host, model, effort defaults (with env-var source tagged when overridden)
+- **Auth gate** — `DARIO_API_KEY` set/unset status (never the value), `DARIO_STRICT_TLS`
+- **OAuth** — credentials-file presence + mode + age (never the tokens)
+- **Account pool** — aliases + pool mode
+- **Backends** — configured OpenAI-compat backend names (no keys)
+- **Paths** — every file dario reads/writes on disk
+
+`--json` for machine consumption. Exports `collectEffectiveConfig()`, `formatEffectiveConfig()`, `formatEffectiveConfigJson()`, `formatAge()` for library callers. 15 new assertions in `test/config-report.mjs` covering `formatAge` boundaries, section/row shape, column alignment, JSON round-trip.
+
+### Added — `dario upgrade`
+
+Thin wrapper over `npm install -g @askalf/dario@latest` with a pre-flight check: probes npm for the current `@latest` version (3s timeout, same pattern as the CC upstream check), refuses to run if already on latest, fails with a clear hint if npm is missing. Saves the round-trip of a no-op install when a user's already current and gives them version context before the install runs.
+
+### Changed — `CHANGELOG` uses `## [Unreleased]` section
+
+New convention: changes land under `## [Unreleased]`. At release time, rename to `## [X.Y.Z] - YYYY-MM-DD` and add a fresh `## [Unreleased]` above. HTML-comment at the top of `CHANGELOG.md` documents it for future maintainers.
+
+## [3.31.9] - 2026-04-23
+
+### Added — `dario doctor --auth-check`
+
+One-shot inbound-request diagnostic for auth-mismatch issues (dario#97 class). Binds an HTTP listener on an ephemeral 127.0.0.1 port, waits for a single request from the user's client (OpenClaw, Hermes, curl, etc.), classifies whatever `Authorization` / `x-api-key` headers the client sent against `DARIO_API_KEY`, and prints a targeted diagnosis with redacted value previews (first 4 / last 4 chars + length — never the raw credential).
+
+Before: a user with a client misconfigured against dario saw a bare `401 "Invalid or missing API key"`, then had to file an issue. v3.31.2 added a verbose reject log on the proxy side that required restart + reproduce. Now it's one command, self-service.
+
+Verdicts:
+- **match** — client's auth matched DARIO_API_KEY. Exits 0.
+- **mismatch** — auth header present but value wrong. Prints redacted preview + targeted hint (sk-ant-… pattern detection for the OpenClaw auth-profiles.json class, missing-Bearer-prefix detection, etc.). Exits 1.
+- **no-auth-header** — client sent neither x-api-key nor Authorization. Hint: set `ANTHROPIC_API_KEY` in the client env. Exits 1.
+- **timeout** — no request arrived within the window (default 30s, configurable via `--timeout-ms=N`). Exits 1.
+- **no-enforcement** — `DARIO_API_KEY` unset, auth not enforced. Tells the user to set it. Exits 1.
+
+Privacy: only redacted previews ever land in output. The raw header value is never logged, never stored, never reflected in the HTTP response.
+
+New exports: `runAuthCheck(opts?)`, `classifyAuthHeaders(headers, expected)`, `redactSecret(value)`. 23 new assertions in `test/auth-check.mjs` — `redactSecret` boundary cases (≤8 chars → length tag, >8 → first/last-4 excerpt), `classifyAuthHeaders` for the 4 verdicts including both-headers-one-matches precedence and array-valued headers, `runAuthCheck` integration with in-process HTTP (match / mismatch / no-auth / timeout / no-enforcement paths).
+
+## [3.31.8] - 2026-04-23
+
+### Added — `dario doctor --json`
+
+Structured JSON output from `dario doctor` for machine consumption. Emits `{generatedAt, exitCode, summary: {ok, warn, fail, info}, checks}`. Matches the Check[] array runChecks returns, wrapped in an envelope so callers that can't read process exit codes still see the verdict. Useful for:
+- claude-bridge's `/status` Discord command — can surface dario's OAuth / template / drift state inline
+- deepdive's own health probes — can confirm the dario endpoint it routes through is healthy before sending LLM calls
+- CI scripts — scrape specific checks instead of parsing human output
+
+Pure function `formatChecksJson(checks)` exported for library use. 10 new assertions in `test/doctor-formatter.mjs` covering envelope shape, exit-code field, summary counts, empty-list case.
+
+### Added — `CC upstream` check (npm latest vs installed)
+
+Doctor now runs `npm view @anthropic-ai/claude-code version` (3s timeout, 60s in-process cache) and emits an `[INFO]` row when the installed CC is older than npm's `@latest`. Silent when on-latest or npm unreachable (no noise). Turns the "my npm CC is stale and dario is running against it" gotcha from the v3.31.5 bake into a one-line hint: *"npm latest is v2.1.119 — installed is v2.1.117. Run `npm install -g @anthropic-ai/claude-code@latest` to upgrade."*
+
+Exported `probeNpmLatestCC()` for library callers.
+
+## [3.31.7] - 2026-04-23
+
+### Added — `dario doctor --probe` exercises Anthropic's authorize endpoint
+
+Added an opt-in live probe to `dario doctor`. When invoked as `dario doctor --probe`, dario sends one GET to `claude.ai/oauth/authorize` with dario's effective OAuth config (same client_id, scope list, PKCE format `accounts add` would use) and surfaces the server's verdict as a doctor check row. This is the single reliable signal for the scope-policy-flip class of bug that broke dario#42 and dario#71 — Anthropic's edge stops accepting a given scope set without any change to the CC binary, so the binary-scan drift watcher can't catch it. The existing nightly probe in `scripts/check-cc-authorize-probe.mjs` hits Cloudflare's bot challenge from GitHub Actions IPs and comes back "inconclusive" most of the time; running from a user's machine makes the probe useful again.
+
+Probe verdicts:
+- **accepted** (`[ OK ]`): authorize endpoint redirected to login/consent or rendered the login page. The scope set is valid.
+- **rejected** (`[FAIL]`): body contained `"Invalid request format"`. Upgrade dario or open an issue — Anthropic flipped policy on our client_id.
+- **inconclusive** (`[WARN]`): fetch error, Cloudflare challenge, or unexpected response. The exact URL is printed on the following `Probe URL` row so the user can paste into their browser — a real browser passes Cloudflare challenges that our fetch-based probe can't.
+
+Privacy: zero PII. The probe uses a fresh PKCE challenge, a dummy localhost redirect_uri, and reads only the response status/Location/body markers. No credentials in the request, no request bodies stored, no telemetry.
+
+Default doctor (without `--probe`) unchanged — still a read-only local scan.
+
+### Internal — probe classifier moved to `src/cc-authorize-probe.ts`
+
+`classifyAuthorizeResponse` and `combineVerdicts` previously lived only in `scripts/_authorize-probe-classifier.mjs`. Moved the source of truth into `src/cc-authorize-probe.ts` (TS) so the doctor check can reuse it, with `scripts/_authorize-probe-classifier.mjs` reduced to a thin re-export wrapper — existing imports in `scripts/check-cc-authorize-probe.mjs` and `test/cc-authorize-probe-classifier.mjs` continue to work unchanged. Added `runAuthorizeProbe(config, opts)` and `buildProbeAuthorizeUrl(config)` exports for the new doctor path and library consumers. 13 new assertions in `test/cc-authorize-probe-run.mjs` covering URL shape, PKCE freshness per-call, accepted/rejected/inconclusive/fetch-error verdicts, trusted redirect following, untrusted redirect stop-at-first-hop. 44/44 suite passes (up from 43).
+
+## [3.31.6] - 2026-04-23
+
+### Fixed — `findInstalledCC` now picks the newest CC on PATH, not the first-found
+
+Surfaced during the v3.31.5 bake: maintainer's Windows PATH had `~/AppData/Roaming/npm/claude.cmd` (npm-installed CC v2.1.117) listed before `~/.local/bin/claude.exe` (native CC v2.1.118). The old `findClaudeBinary` iterated a fixed `['claude.cmd', 'claude.exe', 'claude']` name list and returned the first match, so any dario operation that read the installed CC (live template capture, drift detection, the bake script, `dario doctor`'s "CC binary" line) silently used the older of the two. A user with both an `npm install -g @anthropic-ai/claude-code` (possibly stale) and a native fleet install would see dario run against an older snapshot than they expect, without warning.
+
+- `findClaudeBinary` now enumerates *all* matching candidates across all PATH directories, version-probes each via `--version`, and picks the newest by dotted-numeric comparison. Falls back to first-candidate if every probe fails (sandboxed runtimes, filesystem lockouts). Single-candidate installs skip the version-probe entirely — no extra spawns for the common case.
+- Within a single PATH directory, `.exe` now wins over `.cmd` on Windows (native binary beats the wrapper). This is only decisive when version-probe tiebreaks fail — otherwise the newer version wins regardless of extension.
+- `enumerateClaudeCandidates` exported for unit tests. 8 new assertions in `test/find-claude-binary.mjs` covering empty PATH, Unix single-candidate, cross-dir PATH-order stability, same-path dedup, Windows `.exe`-before-`.cmd` within a dir, and the npm-vs-native dual-install scenario.
+- `DARIO_CLAUDE_BIN` override still takes absolute precedence — the env-var path is never version-probed or compared.
+
+Users on single-install setups see no behaviour change. Dual-install users (common pattern: npm global + native fleet binary) now get whichever version is newer, matching what `claude --version` on the terminal would report.
+
+## [3.31.5] - 2026-04-23
+
+### Changed — Bundled template re-captured against live CC v2.1.118 (dario#103 follow-up)
+
+Captured a fresh template against `@anthropic-ai/claude-code@2.1.118` (native Windows `.exe` install — the npm-packaged binary on my PATH was still 2.1.117; used `DARIO_CLAUDE_BIN` override to point the bake script at the newer binary). Diffed every fingerprint-sensitive axis against the v2.1.117 bake:
+
+- **Byte-identical:** `system_prompt`, `agent_identity`, `header_order`, `body_field_order`, `anthropic_beta`, `user_agent`, schema version, top-level keys.
+- **Same:** tool count (27 post-scrub) and tool name set.
+- **Cosmetic change:** one line in the `Read` tool `description` — `"To read a directory, use an ls command via the Bash tool."` → `"To list files in a directory, use the registered shell tool."`. Wording-only, no schema / parameter / required-field changes. No functional impact on template replay.
+
+No code changes — just the baked `src/cc-template-data.json` refresh. `SUPPORTED_CC_RANGE.maxTested` was already bumped to 2.1.118 in v3.31.4. After this release, `dario doctor` on a CC v2.1.118 install shows no template-version info line, and the nightly drift watcher reports `items: []` (verified locally against `scripts/check-cc-drift.mjs` pre-PR).
+
+## [3.31.4] - 2026-04-23
+
+### Fixed — `dario accounts add` still hitting "Invalid request format" after v3.31.3 (dario#71)
+
+v3.31.3 fixed the authorize-URL host (`claude.com/cai/oauth/authorize` → `claude.ai/oauth/authorize`) but the 5-scope `FALLBACK.scopes` remained — and @tetsuco's CC v2.1.116 `/login` URL, which works, uses the 6-scope list **including** `org:create_api_key`. Anthropic flipped policy back between v2.1.107 (when 5-scope became the only accepted form, dario#42) and v2.1.116 (when 6-scope works again). With the URL fixed but scopes still 5, dario was sending a URL Anthropic now rejects.
+
+- `FALLBACK.scopes` bumped to the 6-scope list with `org:create_api_key` as the first scope — matches what CC v2.1.116's `/login` opens. Scope-list history comment updated with all four known flips on this client_id.
+- `CACHE_PATH` bumped `cc-oauth-cache-v5.json` → `cc-oauth-cache-v6.json` so existing caches (which stored the 5-scope FALLBACK at extract time) regenerate automatically on upgrade.
+- `scripts/check-cc-drift.mjs` `PINNED_OAUTH.authorizeUrl` bumped to the normalized URL and `OAUTH_SCOPES_EXPECTED` to the 6-scope list — drift watcher stays meaningful.
+- `scripts/check-cc-authorize-probe.mjs` flipped: probe A = 6-scope (accepted), probe B = 5-scope (informational; policy may accept both). Previous "known-rejected = 6-scope" assumption no longer holds.
+- `scripts/_authorize-probe-classifier.mjs` `combineVerdicts` updated: A-rejected is still user-facing drift, B-accepted is now info (not medium) because Anthropic may accept both forms.
+
+Tests: `test/oauth-detector.mjs` scope assertions flipped (6-scope set, `org:create_api_key` present as first item); `test/cc-authorize-probe-classifier.mjs` updated for the new A/B semantics.
+
+### Fixed — CC v2.1.118 drift (dario#103)
+
+Nightly drift watcher flagged CC v2.1.118 on npm. `SUPPORTED_CC_RANGE.maxTested` bumped `2.1.117` → `2.1.118`. Baked template stays at v2.1.117 — users on v2.1.118 get a template-version low-severity info in `dario doctor`, not a hard fail. Re-capture against a live v2.1.118 will ship separately once fingerprint-sensitive fields are diffed.
+
+## [3.31.3] - 2026-04-22
+
+### Fixed — `dario accounts add` OAuth authorize URL regression (dario#71)
+
+@tetsuco reported that `dario accounts add <alias>` was hitting Anthropic's "Invalid request format" page on the authorize step. Fresh `claude /login` in Claude Code itself opened `https://claude.ai/oauth/authorize` directly and worked; dario opened `https://claude.com/cai/oauth/authorize` which 307-redirected to claude.ai and got rejected. Same client_id, same scope list, same PKCE, same everything else. Anthropic's edge started rejecting requests arriving via the redirect hop while accepting direct requests.
+
+dario scans `CLAUDE_AI_AUTHORIZE_URL` as a literal string out of CC's binary, and CC ships `"https://claude.com/cai/oauth/authorize"` there. But CC at runtime opens the claude.ai URL directly — the runtime doesn't use that literal verbatim.
+
+- New `normalizeAuthorizeUrl(url)` helper — rewrites the exact literal `https://claude.com/cai/oauth/authorize` to `https://claude.ai/oauth/authorize`, pass-through for every other URL. Applied in the binary extractor and the manual-override applier.
+- `FALLBACK.authorizeUrl` bumped to the normalized URL so fresh-install / scan-failure users hit the correct endpoint.
+- `CACHE_PATH` bumped `cc-oauth-cache-v4.json` → `cc-oauth-cache-v5.json` to invalidate caches populated with the pre-normalization URL. Same invalidation pattern as v3.19.4 (-v3 → -v4 for the 6-scope rotation).
+
+Narrow by design — only the exact legacy URL is rewritten, so operator-supplied staging/IDP overrides pass through untouched. Tests in `test/oauth-authorize-url-normalize.mjs` (11 assertions) pin both the rewrite and the pass-through contract. `test/oauth-detector.mjs` updated to the v5 cache path and the normalized URL.
+
+No behaviour change for users whose dario had already successfully completed an OAuth flow — their `~/.dario/credentials.json` is unchanged. Only affects new `dario login` and `dario accounts add <alias>` flows.
+
+## [3.31.2] - 2026-04-22
+
+### Changed — Verbose log line on 401 auth rejects (dario#97, #98)
+
+@tetsuco reported on dario#97 that OpenClaw started returning HTTP 401 after his v3.30.5 → v3.30.13 upgrade, despite curl with the same key working fine. The 401 body `"Invalid or missing API key"` is dario's own `ERR_UNAUTH` (`src/proxy.ts:742`), and the auth code itself was unchanged across that range. What changed was #74 (v3.30.6): non-loopback binds now refuse to start without `DARIO_API_KEY`, which for the first time actually enforced auth on incoming requests. In pre-#74 setups, `--host=0.0.0.0` without a key left `apiKeyBuf` null and `authenticateRequest` unconditionally passed every request — so clients that weren't sending the header dario expects worked accidentally.
+
+The underlying auth behaviour is correct. The diagnostic experience was not: the 401 path at `proxy.ts:769` silently rejected with no log output, so an operator hitting this had no way to tell whether the client sent no header, a wrong value, or a different header name.
+
+- Exports `describeAuthReject(headers)` — pure function that classifies the reject shape (no header / x-api-key only / Authorization only / both). Header names only; never the provided value, since it may be a real credential the user mistyped.
+- Prints a single `[dario] #N 401 rejected (DARIO_API_KEY mismatch): <reason>` line on every auth-rejected request when `verbose` / `-v` is set.
+
+Zero behaviour change when `-v` is not set. Tests: `test/auth-reject-diagnostic.mjs` — 22 assertions covering the presence matrix, the no-leak-of-value invariant, the pre-existing `authenticateRequest` paths (including the length-shield against prefix-equal false positives), and consistency between the two functions.
+
+## [3.31.1] - 2026-04-22
+
+### Changed — CC 2.1.117 drift patch (dario#95)
+
+The nightly drift watcher flagged CC v2.1.117 landed on npm one minor ahead of dario's pinned `maxTested` (v2.1.116). Captured a fresh template against v2.1.117 locally, diffed every fingerprint-sensitive axis against the v2.1.116 bake:
+
+- **Identical:** `tool_names`, `header_order`, `body_field_order`, `anthropic_beta`, `agent_identity`, `_schemaVersion` (still 3), tool schemas.
+- **Changed:** `header_values['user-agent']` moved `claude-cli/2.1.116` → `claude-cli/2.1.117` (the version string itself, expected). `system_prompt` gained a single new line at the end (an `ultrareview` skill hint added to CC's base prompt; +430 chars). No structural shifts.
+
+Bumped `SUPPORTED_CC_RANGE.maxTested` to `2.1.117` in `src/live-fingerprint.ts` so `dario doctor` stops warning users on the latest CC. Re-baked `src/cc-template-data.json` so the bundled fallback is current. OAuth config (clientId, authorize URL, token URL, scopes) was already unchanged per the drift report.
+
+No behaviour change for users on CC v2.1.116 or earlier. Users on v2.1.117 now see `within the tested range` from `dario doctor` instead of `newer than dario's last tested version`.
+
+## [3.31.0] - 2026-04-21
+
+### Added — Stability policy and contributor process formalized
+
+- **`STABILITY.md`** — new document defining public-surface stability tiers (`@stable` / `@experimental` / `@deprecated`), deprecation cycle (minimum one minor + one major before removal, ~60–90 days), LTS branch strategy (12 months security-only backports per major), release cadence definitions, and the current API surface catalogued by tier.
+- **`CONTRIBUTING.md`** — expanded with a formal review policy (merge bar), release cadence summary, semver commitments, and PR process for stability-boundary changes.
+
+No code changes. This release is a process-formalization milestone: dario's public surface is now catalogued and its stability commitments are written down, so downstream adopters have something to plan against.
+
+## [3.30.13] - 2026-04-21
+
+### Added — Hermes Agent compatibility (dario#88)
+
+@vmvarg4 reported on X that dario worked flawlessly for his OpenClaw but broke on his Hermes Agent. Investigation into [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) surfaced two real gaps:
+
+1. **Hermes ships ~40 tools**, 15+ of which have no CC equivalent (`browser_*`, `vision_analyze`, `image_generate`, `skill_*`, `memory`, `session_search`, `cronjob`, `send_message`, `ha_*`, `mixture_of_agents`, `delegate_task`, `execute_code`, `text_to_speech`). Dario's default-mode tool-mapping distributed them onto random CC slots — silently misrouting every Hermes-specific invocation.
+2. **Hermes requests per-model max_tokens up to 128k for Opus 4.7 and 64k for Sonnet.** Dario's 32k pin silently truncated that output capacity.
+
+Shipping two knobs that close the gap without touching every Hermes user's workflow:
+
+- **Hermes identity detection.** `detectTextToolClient` now recognises `"You are Hermes Agent"` and `"created by Nous Research"` in the system prompt. Returns `'hermes'` which flows through the same auto-preserve-tools dispatch used for Cline/Kilo/Roo — tools pass through verbatim, Hermes's non-CC tools route correctly. Override with `--no-auto-detect` if the operator prefers the full CC fingerprint and accepts the routing cost.
+- **`--max-tokens=<N|client>` flag + `DARIO_MAX_TOKENS` env.** Default (unset) pins 32000 (CC 2.1.116's wire value — behaviour unchanged). A number pins that value; `'client'` passes through whatever the client requested. Hermes users running large-output workloads on Opus should set `--max-tokens=client`. Anthropic enforces the per-model ceiling server-side, so too-high values return a clean 400 rather than silently accepting beyond-model-max.
+
+Internal:
+- `resolveMaxTokens(flag, clientBody)` — pure function exported from `src/cc-template.ts`; same shape as `resolveEffort`
+- `DEFAULT_MAX_TOKENS` — constant exported for tests
+- `resolveMaxTokensFlag(args, env)` — exported CLI parser, whitespace-tolerant, case-insensitive for the `"client"` literal, exits on invalid values
+- `ProxyOptions.maxTokens: number | 'client'` — library consumers can set directly
+
+Tests: `test/hermes-compat.mjs` — 31 assertions covering the Hermes identity detection (canonical + Nous-Research-only paths, prompt-wrapping survival, negative controls), `resolveMaxTokens` pin + passthrough branches (DEFAULT fallback for missing / non-numeric / zero / negative / float body values), `buildCCRequest` integration (outbound `max_tokens` matches flag), `resolveMaxTokensFlag` CLI parsing (flag precedence over env, case-insensitive `client`, whitespace), invalid-value subprocess-exit check.
+
+README Hermes row updated with the full picture: mapped tools, auto-preserve identity anchors, `--max-tokens=client` recommendation for large-output workloads.
+
+## [3.30.12] - 2026-04-21
+
+### Changed — `npm test` runs through `node --test` (dario#79)
+
+Push-back from Claude Opus 4.7's review in `reviews/`: the `npm test` chain was a single `node test/a.mjs && node test/b.mjs && …` of 34 serial invocations. First-failure exits meant you couldn't see whether a second unrelated failure also existed without fixing the first one. No unified reporter either — each file printed its own ad-hoc tally.
+
+New: `test/all.test.mjs` — driver that uses `node:test` to wrap each existing `test/*.mjs` file as a subtest, spawning the file as a subprocess. `npm test` now runs `node --test --test-concurrency=8 test/all.test.mjs`. The 34 existing test files stay untouched — their `check(name, cond)` assertion style and `process.exit(fail === 0 ? 0 : 1)` semantics work as-is. Auto-discovery also picked up `oauth-detector.mjs`, which was silently missing from the serial chain (34 files ran before → 38 now).
+
+What this buys:
+
+- **Non-fatal first-failure.** Every file runs even if one errors, so CI surfaces every regression in a single run instead of one at a time.
+- **Unified TAP / spec reporter.** `node --test` structured output is CI-parseable and integrates with `ts-jest`, `junit-reporter`, etc. if anyone downstream wants to pipe it.
+- **Coverage gap closed.** `oauth-detector.mjs` was never being run before and is now green under the unified runner.
+- **Parallelism available** via `{ concurrency: true }` on each subtest. Wall-time speedup is modest on dario's current suite (most files finish in under 500ms, subprocess startup dominates), but the primitive is there when a slow test file lands that would otherwise serialize behind every other file.
+
+The old serial path is preserved as `npm run test:serial` for anyone who wants one-line-per-file output or is debugging a single flaky test in isolation. Zero runtime dependencies.
+
+## [3.30.11] - 2026-04-21
+
+### Added — Template-replay invariant tests (dario#81)
+
+Push-back from GPT-5.3's review in `reviews/`: existing template tests assert *specific* shapes (exact system-prompt length, exact tool count, byte-level field order). Those tests need updating in lockstep with every template drift — meaning the invariants that *should* be preserved across changes were implicit, not asserted. The dario#54 empty-text-block bug ("text content blocks must be non-empty") was exactly this shape: no specific-shape test caught it because it's a structural property, not a value.
+
+New `test/template-invariants.mjs` asserts properties that must hold **regardless of template version** across 8 scenarios (default sonnet, opus array-content, multi-turn with thinking, hybrid-tools, preserve-tools, single-text-block, JSON round-trip, haiku). **182 assertions** covering:
+
+- Top-level required fields (`model`, `messages`, `max_tokens`, `thinking`, `context_management`, `output_config`) have the expected types and non-empty values for non-haiku; haiku's carve-out correctly skips `output_config` / `thinking` / `context_management`
+- `system` array is exactly 3 text blocks, every block has a **non-empty** `text` string (the dario#54 bug class — if `text` is `undefined`, `JSON.stringify` silently drops it and Anthropic rejects)
+- `system[0]` starts with `x-anthropic-billing-header:` (invariant on the billing-tag slot)
+- `metadata.user_id` is a non-empty string that parses as JSON and contains `device_id`
+- No text block at any depth in `messages[].content[]` carries `text === ''` or a missing `text` field
+- Structural sweep: walking the outbound body finds **zero `undefined` leaves** anywhere — any undefined is a potential silently-dropped field that would serialize as an invalid wire shape
+
+Running cost: negligible (no timers, no promises, pure synchronous assertions over the output of `buildCCRequest`). The invariants run on every `npm test`, so any future refactor that re-introduces a dario#54-shaped bug fails loud at merge instead of shipping and getting caught by a user.
+
+## [3.30.10] - 2026-04-21
+
+### Added — `--effort` flag (dario#87)
+
+User-requested on X: can client-side `output_config.effort` pass through, or be set via a flag? Today dario pins `'high'` on every non-haiku request in `buildCCRequest` to match CC 2.1.116's wire default — client values were silently overwritten.
+
+Flag + env mirror:
+
+- `--effort=low` / `medium` / `high` / `xhigh` — pin the outbound value.
+- `--effort=client` — pass through whatever the client sent in `output_config.effort`; fall back to `'high'` when the client didn't include one or sent a non-string.
+- `DARIO_EFFORT=<value>` — env mirror; explicit flag wins when both are set.
+- Invalid values exit non-zero at startup with the list of valid choices printed to stderr.
+
+`--effort=high` (or unset) preserves the v3.30.x default exactly. **Non-`'high'` values may cause Anthropic's classifier to flip requests to `'overage'` billing** — CC's own wire value is a classifier axis and we don't have empirical evidence of which alternates the server currently accepts. Operators opting in should watch `-v` logs for `representative-claim` changes.
+
+Haiku carve-out preserved: non-haiku requests get `output_config.effort`, haiku requests still skip the `output_config` block entirely regardless of flag.
+
+Internal:
+- `resolveEffort(flag, clientBody)` — pure function exported from `src/cc-template.ts`; drives the outbound value and is the single source of truth for the passthrough / fallback logic.
+- `VALID_EFFORT_VALUES` — readonly array exported so third parties can enumerate the supported set.
+- `resolveEffortFlag(args, env)` — exported CLI parser; case-insensitive, whitespace-tolerant; validates + exits on unknown values.
+
+Tests: `test/effort-flag.mjs` — 37 assertions covering the valid-set shape, all pin values, the `'client'` passthrough + fallback branches, the buildCCRequest integration (outbound `output_config.effort` matches the flag), the haiku carve-out, the CLI parser (flag precedence over env, case, whitespace), and the invalid-value subprocess-exit check.
+
+## [3.30.9] - 2026-04-21
+
+### Changed — Bounded request queue replaces unbounded semaphore (dario#80)
+
+Push-back from Gemini's review: the v3.30.x-and-earlier concurrency control was a 10-slot semaphore with an unbounded FIFO waiting behind it. Under high client fan-out this produced two pathological modes — unbounded waiters stacking up in process memory and no way for the operator to see or tune it, and long-tail latency where the 61st concurrent request would silently wait forever for a slot that wasn't coming any time soon. Replacement: a bounded `RequestQueue` with three knobs.
+
+- **`src/request-queue.ts` (new, ~135 LOC, zero deps).** Pure `decideAdmit(state)` decision function separate from the class that applies it — so tests exercise every branch without timers or promises, and the admission logic is reviewable in isolation. `decideAdmit` returns `admit` / `enqueue` / `reject:queue-full`.
+- **Three knobs with sane defaults.** `maxConcurrent=10` (unchanged — the same value as the old semaphore), `maxQueued=128` (new — total requests dario will hold before rejecting), `queueTimeoutMs=60000` (new — how long a queued request waits before dario returns 504).
+- **Explicit HTTP errors on overload.** When the queue is full, dario returns `429` with a `rate_limit_error` body that names `queue-full`, `max-concurrent`, and `max-queued` so the operator can see exactly which knob to tune. When a queued request times out waiting for a slot, `504` with `timeout_error` + `queue-timeout` marker. Previously the request would silently queue indefinitely.
+- **Flags + env mirrors.** `--max-concurrent=N` (`DARIO_MAX_CONCURRENT`), `--max-queued=N` (`DARIO_MAX_QUEUED`), `--queue-timeout=MS` (`DARIO_QUEUE_TIMEOUT_MS`). `parsePositiveIntEnv` exported from CLI for reuse by any future positive-int env mirror.
+- **Tests.** `test/request-queue.mjs` — 34 assertions across decision-function branches (admit/enqueue/reject, zero-cap degenerates), the pure timeout check, the class's immediate-admit / queue-full-reject / FIFO-release-order / timeout-reject behaviours, the `parsePositiveIntEnv` parser, and the `DEFAULT_*` constants match the documented defaults.
+
+Default behaviour is close-to-bit-identical with v3.30.8 for any client that stayed under 138 concurrent requests (10 in flight + 128 queued). Above that, the old semaphore would have grown memory with queued promises forever; the new queue returns a clear 429 instead. For operators who genuinely want the old unbounded-queue behaviour back, `--max-queued=1000000` is a legal value.
+
+## [3.30.8] - 2026-04-21
+
+### Added — `--no-live-capture` and `--strict-template` flags (dario#77)
+
+Convergent push-back from Grok + GPT reviews: *"drift resilience should be opt-in-verifiable, not silently best-effort."* Today dario falls back to the bundled snapshot on live-capture failure and warns in one line; two kinds of operator need the opposite behaviour.
+
+- **`--no-live-capture` / `DARIO_NO_LIVE_CAPTURE=1`.** Skip the background `refreshLiveFingerprintAsync()` call entirely. dario uses the bundled snapshot and will not spawn the installed Claude Code binary. For air-gapped hosts, reproducible-build CI, and deliberate template pinning. Logs a one-line "capture skipped" confirmation on startup so operators can verify the flag took effect.
+- **`--strict-template` / `DARIO_STRICT_TEMPLATE=1`.** Refuse to start if the loaded template is the bundled snapshot (no live capture has ever succeeded) or if it drifts from the installed CC version. Emits a specific problem → fix message — same philosophy as `--strict-tls`: make the unsafe state require intent. First boot without a live capture prints `run \`claude --print hello\` once`, because that's the one-line way to produce the capture dario needs.
+
+Semantics when both flags are set: dario honours `--no-live-capture` (skip capture) and `--strict-template` (fail if bundled is incompatible). In practice these compose — an air-gapped operator can enforce both a no-spawn policy and a bundled-compat guarantee on the same run.
+
+Env mirror parser (`parseBooleanEnv`) accepts `1` / `true` / `yes` / `on` (case-insensitive, whitespace-tolerant). Exported for tests; reused by these two flags and available for any future boolean env mirror.
+
+**`ProxyOptions.noLiveCapture`** and **`ProxyOptions.strictTemplate`** added — CLI threads both through; library consumers can set them directly. Default behaviour unchanged.
+
+Tests: new `test/strict-template-flags.mjs` (16 assertions) exhaustively covers `parseBooleanEnv` — 8 truthy including case / whitespace variants, 8 falsy/unset. End-to-end runtime checks (exit on bundled-in-strict-mode, exit on drift-in-strict-mode, banner-printed under `--no-live-capture`) exercise through the proxy startup path under integration coverage.
+
+## [3.30.7] - 2026-04-21
+
+### Added — `--preserve-orchestration-tags` flag (dario#78)
+
+Push-back from Gemini's review: dario's default orchestration-tag scrub (`<system-reminder>`, `<env>`, `<thinking>`, `<agent_persona>`, etc.) is right for most callers but *wrong* for workflows that legitimately rely on one of those tags as signal to the model — e.g., a debugging agent that explicitly forwards `<thinking>` so it can observe reasoning traces, or an evaluator that keeps `<env>` for reproducibility. Those workflows were breaking silently under dario.
+
+New CLI flag + env mirror:
+
+- `--preserve-orchestration-tags` (bare) → preserve **all** orchestration tags; the scrub becomes a no-op.
+- `--preserve-orchestration-tags=tag1,tag2` → preserve only the listed tags; everything else in `ORCHESTRATION_TAG_NAMES` is still stripped.
+- `DARIO_PRESERVE_ORCHESTRATION_TAGS=*` or `=tag1,tag2` — env mirror; explicit CLI flag wins when both are set.
+
+Default behaviour unchanged — the flag is strict opt-in. `sanitizeMessages` now takes an optional `preserveTags: Set<string>` argument; internal callers thread the option through `ProxyOptions.preserveOrchestrationTags`. `buildOrchestrationPatterns` and `ORCHESTRATION_TAG_NAMES` are exported so third parties building on top of dario's proxy primitives can reuse the same tag list and pattern-building logic.
+
+Tests extend `test/sanitize-messages.mjs` — 10 new assertions covering preserve-all, preserve-one-tag, undefined-equals-default, pattern-count invariants, and all six branches of `resolvePreserveOrchestrationTags` (bare flag, `=list`, `=*`, env `*`, env list, flag-wins-over-env, whitespace tolerance, empty value).
+
+## [3.30.6] - 2026-04-21
+
+### Changed / Added — Tier-1 review-feedback items from `reviews/`
+
+The four frontier-LLM reviews landed in v3.30.5 each surfaced push-back; this release ships the four smallest items (dario#73, #74, #75, #76). Larger items (drift-strict flags #77, orchestration-tag opt-out #78, `node --test` migration #79, fair-use queue #80, invariant tests #81) stay open for focused follow-up.
+
+- **`npm audit` CI gate via `npm run audit`** (dario#73). The workflow already ran `npm audit --production --audit-level=high` inline; this switches the step to the named script in `package.json` so the CLI and CI agree on exactly one gate expression and anyone tuning the audit level changes it in one place.
+- **Refuse-to-start when `--host` is non-loopback and `DARIO_API_KEY` is unset** (dario#74). Previously dario warned and started anyway; operators who didn't read the banner could leave an open OAuth-subscription relay on the LAN. Now the CLI exits non-zero with a three-line explanation (problem → fix → escape-hatch). Escape hatch: `--unsafe-no-auth` for the rare "I have network controls out-of-band and accept the risk" case.
+- **`POOL_HEADROOM_FLOOR` constant in `src/pool.ts`** (dario#75). The `0.02` headroom threshold appeared three times as a literal in `selectSticky`, `waitForAccount`, and `drainQueue`. Hoisted to a named constant with a doc comment next to `STICKY_TTL_MS` and `STICKY_MAX_ENTRIES` so the three routing branches agree by construction and future tuners can grep to the one place.
+- **Bundled template declares `_supportedMaxTested`** (dario#76). The bundled fallback snapshot (`src/cc-template-data.json`) and the bake script (`scripts/capture-and-bake.mjs`) now record the newest CC version the snapshot was verified against. `loadBundledTemplate` probes the installed CC and warns at startup when the user's CC is newer than the snapshot was tested against. Fail-closed mode (`--strict-template`) stays in dario#77.
+
+## [3.30.5] - 2026-04-21
+
+### Changed — `SUPPORTED_CC_RANGE.maxTested` → 2.1.116
+
+`src/live-fingerprint.ts` bumps `maxTested` from `2.1.114` to `2.1.116`. dario v3.30.4 re-baked the bundled template against CC 2.1.116 and the MITM check showed zero wire-shape regressions, so the constant that gates the doctor's "installed CC is within tested range" message now reflects what's actually validated. Resolves the cc-drift-watch auto-issue filed against the 2.1.114 ceiling.
+
+## [3.30.4] - 2026-04-20
+
+### Added — Platform-scoped tool filtering
+
+CC v2.1.116 on Windows ships a new `PowerShell` tool alongside `Bash`; POSIX CC installs do not advertise it. The bundled template was captured on POSIX and lacked PowerShell, which meant Windows users at cold start (pre-live-capture) sent a POSIX-shaped tool set upstream — a fingerprint mismatch against what real CC on their host would declare. Conversely, baking the bundled from Windows alone would push `PowerShell` onto POSIX outbound, with the same problem in the opposite direction.
+
+- **Bundled template re-baked from CC v2.1.116 (Windows).** Now 27 tools, `_version` → `2.1.116`, `PowerShell` included. System prompt unchanged; MCP tools scrubbed as usual.
+- **Runtime platform filter.** `filterToolsForPlatform(tools, platform)` in `src/cc-template.ts` (also mirrored in `src/shim/runtime.cjs`) drops tools listed under a platform key other than the current `process.platform`. `PLATFORM_ONLY_TOOLS.win32 = {PowerShell}` for now; future platform-scoped tools are a one-line map addition.
+- **Outbound matches the host.** `CC_TOOL_DEFINITIONS` (consumed by `buildCCRequest`) and the shim's `body.tools` replay both go through the filter, so the tool array Anthropic sees on a Windows host includes PowerShell and on a POSIX host does not.
+- **New test suite.** `test/platform-tools.mjs` covers the win32 / linux / darwin / freebsd / openbsd / unknown branches plus empty-array and no-op passthrough. 29 assertions total, full `npm test` green.
+
+## [3.30.3] - 2026-04-19
+
+### Fixed — `dario#54`: Claude CLI on CC v2.1.112 → "text content blocks must be non-empty" 400
+
+`sanitizeMessages` strips orchestration-wrapper tags (`<system-reminder>`, `<env>`, etc.) from message content text blocks in place. CC v2.1.112 splits per-reminder system-reminders into **separate** content blocks — one block per reminder. After scrubbing, each of those blocks becomes `{type:'text',text:''}`, and Anthropic rejects the request upstream with `"messages: text content blocks must be non-empty"`. Reproducer in tetsuco's body dump on #54: three empty text blocks preceding the real `hello` block.
+
+Fix: in `sanitizeMessages`, after in-place scrubbing each block's text, drop blocks that are now `{type:'text',text:''}`. Non-text blocks (`tool_result`, `tool_use`, `image`) pass through regardless. Coverage: new `test/sanitize-messages.mjs` (11 assertions) exercises the 4-block CC v2.1.112 shape, adjacent real-text preservation, `tool_result` passthrough, all-reminder → empty-content-array transition, and non-text-block safety.
+
+### Fixed — `dario#58`: `seven_day` billing claim showed `unknown` bucket + `n/a` overage
+
+Anthropic is rolling out a new subscription rate-limit claim value — `seven_day` (and `seven_day_fallback`) — alongside the legacy `five_hour` / `five_hour_fallback`. Semantics are identical (subscription covered the request), only the representative-claim header string changed. Two display paths in dario hardcoded the five_hour family:
+
+- `billingBucketFromClaim` (`src/analytics.ts`) mapped unknown claims to `'unknown'`, so the proxy log showed `billing: unknown (seven_day, …)` instead of `billing: subscription (seven_day, …)`.
+- The overage-fallback in `src/proxy.ts` treated a missing `anthropic-ratelimit-unified-overage-utilization` header as `'n/a'` on everything except `five_hour[_fallback]`. For `seven_day`-claim accounts the fallback therefore reported `overage: n/a` instead of the correct `0%`.
+
+Both sites extended to also match `seven_day` / `seven_day_fallback`. `test/analytics-billing-bucket.mjs` updated with matching assertions.
+
+## [3.30.2] - 2026-04-19
+
+### Added — Claude Agent SDK positioning + metadata-only drift watcher
+
+- **README: Claude Agent SDK audience.** Adds Agent SDK users to the "Who this is for" list and to the Agent compatibility table. One-line config (`baseURL: 'http://localhost:3456'`) turns dario into an OAuth-subscription backend for any `@anthropic-ai/claude-agent-sdk` app — the SDK and CC share the same tool schema as of CC v2.1.114 / Agent SDK 0.2.x, so no translation work is needed on the agent's side.
+- **`scripts/check-sdk-drift.mjs` (wired as `npm run drift:sdk`).** Metadata-only drift watcher that compares `@anthropic-ai/claude-code`, `@anthropic-ai/claude-agent-sdk`, and `@anthropic-ai/sdk` (Stainless transport) versions against dario's bundled template. Complements the heavy `check-cc-drift.mjs` (which downloads the 235MB native CC binary and scans it) — this one runs in seconds via `npm view` only, and flags `cc_version` or `x-stainless-package-version` drift as a fast pre-check suitable for high-frequency gating.
+
+## [3.30.1] - 2026-04-19
+
+### Changed — Drift patches for CC v2.1.114 wire shape
+
+MITM capture of an active CC v2.1.114 client showed four fingerprint drift points in the body dario builds for Claude-subscription requests. All four are now aligned with what real CC emits.
+
+- **`cache_control` drops `ttl: '1h'`.** CC v2.1.114 now sends `{"type":"ephemeral"}` bare on `system[1]` and `system[2]` cache markers. Dario's `buildCCRequest` and `src/shim/runtime.cjs` `rewriteBody` updated to match. The `CACHE_1H` local in `proxy.ts` is renamed to `CACHE_EPHEMERAL` and the `buildCCRequest` parameter `cache1h` is renamed to `cacheControl` — both the naming and the type (`{type: 'ephemeral'}`) now reflect that these are no longer 1h-scoped.
+- **`max_tokens` lowered from 64000 to 32000.** Matches the value CC v2.1.114 sends for sonnet requests.
+- **`output_config.effort` raised from `'medium'` to `'high'`.** Matches CC v2.1.114's non-haiku default.
+- **`cc_entrypoint` changed from `cli` to `sdk-cli`.** CC has migrated to the Claude Agent SDK (also visible in the `x-stainless-package-version: 0.81.0` header); the billing tag now reflects that entrypoint.
+
+Test fixtures and a few fixture-adjacent assertions in `test/hybrid-tools.mjs`, `test/client-detection.mjs`, `test/issue-29-tool-translation.mjs`, `test/live-fingerprint.mjs`, `test/proxy-body-order.mjs`, `test/shim-runtime.mjs`, and `test/tool-schema-contract.mjs` updated to the new wire shape. Full `npm test` green.
+
+## [3.30.0] - 2026-04-19
+
+### Removed — Sealed-sender overflow protocol and mux coordination surface
+
+The sealed-sender RSA blind-signature primitive and the mux gateway auth lane are removed from dario. Both were landed to support [mux](https://github.com/askalf/mux) as a peer-to-peer capacity-sharing product; mux is on hold, so the code moves out of dario. Dario returns to its original scope — a focused universal LLM router — with ~1000 lines of crypto + coordination code shed from the audit surface.
+
+- **`src/sealed-pool.ts` deleted** (~553 lines). `GroupAdmin` / `GroupMember` / `GroupLender` classes, RSA-FDH primitives, blind-signature flow, and borrow-envelope codec are gone. The code is preserved in the mux repo where a future mux revival can consume it directly.
+- **`POST /v1/pool/borrow` endpoint removed from `src/proxy.ts`.** The endpoint was gated on `~/.dario/group.json` and returned 503 for users without that file, so removal is a breaking change only for runners of a mux lender daemon — a set which is currently empty given mux is on hold.
+- **`MUX_COORD_SECRET` / `X-Mux-Coord-Secret` auth lane removed.** `authenticateRequest` signature simplifies to `(headers, apiKeyBuf)`. The CORS `Access-Control-Allow-Headers` list drops `x-mux-coord-secret`. Startup banner no longer mentions mux lender mode. Users who only set `DARIO_API_KEY` see no behavioural change.
+- **Tests removed.** `test/sealed-pool.mjs` (375 lines, 85 assertions) and `test/mux-coord-secret.mjs` (109 lines, 16 assertions) deleted and dropped from the `npm test` script. Total test footprint: ~1,185 assertions across 32 files (was ~1,286 across 34).
+- **README cleaned.** "Sealed-sender overflow protocol" section, the "share capacity with a trusted group" value paragraph, the `/v1/pool/borrow` endpoint row, and the `src/sealed-pool.ts` file-purpose row all removed. The "v4 is not a version bump" teaser banner is stripped — it pointed at roadmap work that is now on hold. Line/assertion counts updated throughout.
+
+### Why this release
+
+Mux (the peer-to-peer capacity-sharing product that consumed dario's sealed-sender primitive) is paused. With no active consumer of `/v1/pool/borrow`, `MUX_COORD_SECRET`, or the 550-line `sealed-pool.ts` module, the code is dead weight in dario — extra audit surface for users who will never call it, one more thing to maintain during template-drift updates, and a conceptual expansion that muddies dario's single-sentence pitch. Removing it returns dario to what the README opening says it is: a universal LLM router. If mux resumes later, the primitive can come back; for now, the mux repo carries the implementation independently and dario doesn't pay for code that has no consumer.
+
+## [3.28.0] - 2026-04-17
+
+### Added — Tunable session-ID lifecycle (direction #1)
+
+Every outbound request to Anthropic carries a session identifier in the CC body's `metadata.session_id` and the `x-claude-code-session-id` header. Real Claude Code holds that id stable through a conversation and rotates when the user returns after an idle gap — roughly "one id per conversation", not per HTTP call. v3.18 rotated per request (itself a fingerprint); v3.19 hardcoded a single 15-minute idle window; v3.28 generalises that into a tunable registry so operators can shape rotation cadence, multi-client proxies stop collapsing onto one id, and always-on pipelines don't keep a single id alive indefinitely. Default behaviour (no flags, no env vars) is bit-identical to v3.27 — the old 15-minute idle window, one session across all callers, no max-age. Pool mode is unaffected: each pooled account keeps its stable `identity.sessionId` for its lifetime as before.
+
+A subtle v3.27 inconsistency is also fixed along the way. v3.27 read the module-level `SESSION_ID` twice per request — once when building the CC body's `metadata.session_id`, once when emitting the `x-claude-code-session-id` header — with the rotation decision between those two reads. On rotation events, body and header disagreed. v3.28 resolves the outbound id once before the body build so the two always match.
+
+- **`src/session-rotation.ts` — new pure module.** `SessionRotationConfig { idleRotateMs, jitterMs, maxAgeMs?, perClient }`, `decideSessionRotation(entry, now, cfg)` returning `keep` | `rotate-new` | `rotate-idle` | `rotate-age`, `SessionRegistry` class with LRU eviction at 1024 entries, and `resolveSessionRotationConfig(explicit, env)` with explicit > env > defaults precedence. Id generation and RNG are injected through the constructor so tests are deterministic without mocking the UUID module. Jitter is sampled once per session at creation (not per decision) so a given session has a fixed effective threshold for its lifetime — matches what a human-paced conversation looks like over many turns.
+- **`src/proxy.ts` — registry replaces the hardcoded rotation block.** `SESSION_ID` / `SESSION_LAST_USED` / `SESSION_IDLE_ROTATE_MS` removed; the constructor wires `SessionRegistry` once per proxy start and uses it on every non-pool dispatch. `SESSION_ID` is retained purely as a mirror of the last-assigned single-account id so out-of-band consumers (the presence heartbeat pinging `/v1/code/sessions/$ID/client/presence`) can read the currently-active id without going through the registry. Body/header parity is enforced by resolving the id once (`preBodySessionId`) and threading it to both sides.
+- **`src/cli.ts` — four new flags.** `--session-idle-rotate=MS` (default 900000), `--session-rotate-jitter=MS` (default 0), `--session-max-age=MS` (default off), `--session-per-client` (default off). All four are additive and independent; any combination is legal. Mirrored by env vars `DARIO_SESSION_IDLE_ROTATE_MS`, `DARIO_SESSION_JITTER_MS`, `DARIO_SESSION_MAX_AGE_MS`, `DARIO_SESSION_PER_CLIENT` for non-interactive deployments. Boolean env accepts `1` / `true` / `yes` / `on` (case-insensitive).
+
+### Added — Test coverage
+
+- **`test/session-rotation.mjs`** — new test file across 20+ sections covering: the pure `decideSessionRotation` branches (missing entry → `rotate-new`, fresh within window → `keep`, exactly at threshold → `keep` with strict `>`, past threshold → `rotate-idle`, jitter extends effective threshold, max-age triggers `rotate-age` under constant activity, idle wins over age when both trip, `maxAgeMs=0`/`undefined` both disable, negative `idleRotateMs` clamps to 0); `SessionRegistry` state transitions (first call mints + reports `rotate-new`, second call keeps, idle rotation replaces in place without growing the map, `lastUsedAt` refreshed on keep so the window slides, jitter offset is sticky for a session's lifetime, max-age rotates under constant activity, `perClient=false` collapses all `clientKey`s onto a single bucket, `perClient=true` separates by header, empty/undefined keys both fall back to `'default'`, LRU eviction honours the `maxEntries` cap, accessing a session refreshes its LRU position, `peek()` does not bump `lastUsedAt`, `clear()` empties); `resolveSessionRotationConfig` precedence (defaults match v3.27, env vars override, explicit wins over env, invalid numeric env falls through, all truthy/falsy boolean strings parsed, floats truncated via `Math.floor`).
+
+Total test footprint grows to **32 files** with the v3.28 suite green alongside v3.27's MCP coverage.
+
+### Why this release
+
+Direction #1 from the "get ahead of Anthropic" roadmap — the sixth and last of the fingerprint-tightening directions. The previous five (TLS in v3.23, pacing in v3.24, stream-drain in v3.25, sub-agent in v3.26, MCP server in v3.27) each closed one axis of observable divergence from real Claude Code. Session-id lifecycle is the remaining behavioural axis visible in request metadata. The three new knobs (jitter, max-age, per-client) each correspond to a scenario where v3.27's single hardcoded 15-minute window falls short: long-running proxies holding one id across days (max-age), multi-UI fan-out collapsing distinct conversations onto a single id (per-client), and observers who can infer the exact 15-minute floor from long-run rotation cadence (jitter). Operators who are happy with v3.27's single-account behaviour don't have to touch anything — defaults are bit-identical. The v3.27 body/header rotation race is fixed as a side effect of consolidating the read: both now draw from the same `preBodySessionId` resolved once per request. The roadmap directions are complete; from here releases return to responding to issues and to upstream template drift.
+
+## [3.27.0] - 2026-04-17
+
+### Added — dario as MCP server (direction #4)
+
+Claude Code, Claude Desktop, and the growing ecosystem of IDE plugins speak MCP (Model Context Protocol) — stdio-based JSON-RPC 2.0 with a small method set for exposing tools and resources to an LLM-driven session. v3.27 turns dario itself into an MCP server so any MCP client can introspect dario's state (auth, pool, backends, template / fingerprint, sub-agent install) the same way it would call any other tool. No more switching out of an MCP-aware editor to run `dario doctor` in a separate terminal — the LLM can query dario directly, in-context.
+
+The server is strictly read-only: mutations (`dario login`, `accounts add`, `backend add`, `subagent install`, `proxy` start/stop) are not exposed. Same boundary as the CC sub-agent from v3.26 — an MCP client shouldn't be able to alter dario's persisted state just by being connected. All exposed tools take zero arguments (`inputSchema.required = []`) and return a single text block so the LLM consumer has a predictable shape to reason about.
+
+- **`src/mcp/protocol.ts` — pure JSON-RPC 2.0 + MCP method dispatcher.** Zero-runtime-deps policy rules out `@modelcontextprotocol/sdk`; the protocol surface we need (`initialize`, `tools/list`, `tools/call`, plus notifications and the five canonical JSON-RPC error codes) is small enough to hand-roll and lock down with tests. `parseLine` / `encodeMessage` handle newline-delimited JSON framing; `handleMessage(msg, tools, serverInfo)` is pure over its inputs so the unit tests can exercise every branch without streams. Notifications (no-`id` messages) return `null` instead of a response frame per JSON-RPC spec. Handler errors are wrapped into `-32603 internal_error` responses — a buggy tool never propagates an unhandled rejection into the stdio loop.
+- **`src/mcp/tools.ts` — six read-only tools wrapping existing dario subsystems.** `buildToolRegistry(data: ToolDataSources)` is a factory taking an injectable data-source bundle (fake in tests, real dynamic imports in `buildDefaultToolRegistry`) so the registry stays pure over its inputs. Tools: `doctor` (full health report — reuses `runChecks` + formats with aligned `[ OK ]` / `[WARN]` / `[FAIL]` / `[INFO]` prefixes + summary), `status` (OAuth auth state), `accounts_list` (pool accounts + expiry — never touches API keys), `backends_list` (configured OpenAI-compat backends — redacts keys completely, not even a `sk-…` prefix), `subagent_status` (sub-agent install + version-match state), `fingerprint_info` (runtime / TLS / template-source / schema version). No destructive tool names are reachable — the test suite asserts the forbidden set (`login`, `logout`, `accounts_add`, `accounts_remove`, `backend_add`, `backend_remove`, `proxy_start`, `subagent_install`, `subagent_remove`) is not exposed so a future drift accidentally shipping a mutation tool gets caught.
+- **`src/mcp/server.ts` — stdio event loop.** `runMcpServer({ tools, server, stdin, stdout, stderr })` reads newline-delimited JSON from stdin with `readline` (`crlfDelay: Infinity` for Windows MCP clients), parses each line, dispatches through `handleMessage`, and writes back with a promise-wrapped back-pressure-aware `stream.write` so a slow consumer can't make us buffer unboundedly. Ordered serial processing — one message in flight at a time — keeps stdio frames deterministic and matches what tests assert on. Streams are injectable so end-to-end tests run against a `PassThrough` pair without spawning a subprocess.
+- **`src/cli.ts` — `dario mcp` command.** Added to the command dispatcher alongside `subagent` and `doctor`. Redirects `console.log` / `console.info` to stderr for the lifetime of the server — MCP stdio requires that *only* protocol frames go to stdout, so any stray log from a downstream module (doctor checks, oauth probes) would corrupt the frame stream. Help text describes the six exposed tools and the read-only boundary.
+
+### Added — Test coverage
+
+- **`test/mcp-protocol.mjs`** — 62 new assertions across 16 sections: `parseLine` happy path (request, notification), blank-line tolerance (empty / whitespace-only return `ok=false, error=null`), parse errors (garbage, non-object top-level, `null`, wrong `jsonrpc` version, missing or non-string `method`), `successResponse` / `errorResponse` shape (id echoed, `data` passed through only when provided, `id: null` allowed for unparseable origin), `encodeMessage` newline framing + JSON round-trip, `handleMessage` for `initialize` (pinned `protocolVersion`, `capabilities.tools`, serverInfo), `tools/list` (order preserved, handler stripped from the exposed tool record), `tools/call` (happy path, missing arguments defaulted to `{}`, non-object arguments coerced to `{}`), error branches (`-32601` unknown method, `-32602` missing name, `-32601` unknown tool, `-32603` handler throw wrapped instead of propagating), and notifications (`null` return, including unknown notification method names).
+- **`test/mcp-tools.mjs`** — 81 new assertions across 18 sections: registry shape (exactly six tools, forbidden mutation names absent, every tool has a description + object-typed schema with zero required args), `doctor` formatter (all four status prefixes render, label padding holds, summary reports counts, empty list handled gracefully), `status` for all three auth states (authenticated, no-credentials with login hint, expired-but-refreshable), `accounts_list` for empty pool / single-account / 2+-account (singular vs plural, expired marker, pool-mode hint only when actually in single-account mode), `backends_list` with key-redaction assertions (`sk-` prefix absent, `apiKey` label absent — defense-in-depth against a future data-source accidentally leaking the secret), `subagent_status` for all four computed states (not-installed + CC-missing, installed + current, installed + stale with re-install hint, not-installed + CC-present with install hint), `fingerprint_info` for Bun-match / Node-diverged / null-schema rendering.
+- **`test/mcp-e2e.mjs`** — 25 new assertions across 6 sections exercising the stdio event loop against a `PassThrough` pair: full handshake flow (`initialize` → `notifications/initialized` [no response] → `tools/list` → `tools/call` → EOF — exactly 3 frames emitted, correct ids, correct order), parse-error recovery (malformed line emits `-32700` with `id: null`, next valid request still served), framing noise tolerance (blank lines + CRLF silent, producing zero extra frames), handler-throw recovery (`-32603` emitted, subsequent request still served — server doesn't die on a bad tool), unknown-method handling (`-32601` then continue), clean shutdown (EOF on stdin resolves `runMcpServer` within 1s).
+
+Total test footprint: **1151 assertions across 31 files** (was 983). Full `npm test` green.
+
+### Why this release
+
+Direction #4 from the "get ahead of Anthropic" roadmap. The v3.26 sub-agent put dario at CC's fingertips inside a single CC session; v3.27 broadens that reach to every MCP client — Claude Desktop, Cursor, Zed, any future MCP-aware editor — without dario needing to know about any of them specifically. The design decisions that fell out of the zero-runtime-deps constraint ended up being wins on their own: hand-rolling the JSON-RPC dispatcher kept the surface small (three methods, five error codes), the pure `handleMessage` split made every branch testable without streams, and the injectable `PassThrough` streams let the e2e test stay in-process. Read-only scope is the other deliberate choice: exposing mutations to any connected MCP client would mean every tool the user connects could, say, add a backend without the user noticing. Read-only tools are strictly additive — an MCP client can *observe* dario, but changing dario's state stays a CLI action the user types with intent. Future directions from the roadmap — #1 (session-ID rotation on the interactive side) and the remaining fingerprint axes — can land on top without re-opening this scope.
+
+## [3.26.0] - 2026-04-17
+
+### Added — Claude Code sub-agent hook (direction #2)
+
+Claude Code reads sub-agent definitions from `~/.claude/agents/*.md` — each one is a tool-scoped prompt context that CC can delegate work into via the Task tool (or that the user can invoke directly with "use the X sub-agent to…"). v3.26 registers a first-party `dario` sub-agent so CC has a named handle for running dario diagnostics and template-refresh operations inside an ongoing CC session — no more context-switching out to a terminal when you hit a `[WARN]` row or suspect template drift.
+
+The sub-agent is tool-scoped to `Bash, Read` and its prompt forbids destructive operations (credential mutation, account pool changes, backend config changes) without explicit user confirmation. `dario proxy` is also explicitly off-limits from inside the sub-agent (it would block the parent CC session). The boundary is intentional: CC can ask dario to *report*, not to *change state*.
+
+- **`src/subagent.ts` — install/remove/status lifecycle.** `buildSubagentFile(version)` returns the full markdown body (pure, pinned by tests — changing the content is a visible diff). `computeSubagentStatus` is pure over `(fileExists, fileBody, currentVersion)` and distinguishes four states: not-installed-and-CC-missing (`agentsDirExists: false`), not-installed-but-CC-present, installed-and-current, installed-but-stale (the on-disk `<!-- dario-sub-agent-version: X -->` marker doesn't match the running dario). `installSubagent` auto-creates `~/.claude/agents/` when absent, returns `created` / `updated` / `unchanged` so the CLI can log accurately, and never overwrites unrelated sub-agent files in the same directory. `removeSubagent` is idempotent and deliberately does not remove the parent `agents/` directory (other sub-agents may coexist).
+- **`src/cli.ts` — `dario subagent install | remove | status`.** Three subcommands matching the `dario accounts` / `dario backend` pattern. `status` is the default when the verb is omitted. Unknown verbs print a short usage block and exit 1.
+- **`src/doctor.ts` — new "Sub-agent" check.** Between the Backends and Home rows. Reports `info` when CC isn't installed (no `~/.claude/agents/` to write into), `info` when installed-but-sub-agent-missing (with the install command inline), `warn` when installed-but-stale (with the refresh command inline), and `ok` when installed and current.
+- **`src/cli.ts` — help text.** Three new lines under the command list pointing at `install` / `remove` / `status`.
+
+### Added — Test coverage
+
+- **`test/subagent.mjs`** — 48 new assertions across 7 sections. Pure-helper coverage: `buildSubagentFile` pinned structure (frontmatter delimiter, name field, description field, tool restriction line, version marker embedding, safe-op mentions, destructive-op warnings), determinism (same version → byte-identical; differing version → only the marker changes). `computeSubagentStatus` branches: file absent (with CC dir present and absent), file present with matching marker, file present with mismatched marker (installed-but-stale), file present without any marker (user-hand-edited). Filesystem round-trip against an isolated temp HOME: pre-install status, install creates the directory + file, on-disk content matches `buildSubagentFile(r.version)`, post-install status reports installed+current, re-install with no change reports `unchanged`, stale-file install reports `updated`, remove reports `removed=true` then `removed=false` (idempotent), agents dir persists after remove (other sub-agents untouched). Dedicated "populated agents dir" section verifies `install` doesn't clobber an unrelated sub-agent and `remove` only unlinks `dario.md`.
+
+Total test footprint: **983 assertions across 28 files** (was 935). Full `npm test` green.
+
+### Why this release
+
+Direction #2 from the "get ahead of Anthropic" roadmap. The original framing was "funnel consumer traffic through CC session" — a maximal-fidelity vision where third-party consumers would route through a running CC's own session, inheriting its TLS stack, headers, and billing classification. That shape needs infrastructure that doesn't fit a single release (CC-as-a-subprocess, request multiplexing, billing attribution). v3.26 ships the tighter, more-immediately-useful slice: a CC-side handle that makes dario's existing diagnostics and refresh commands first-class CC operations. The maximal vision is not ruled out — `src/subagent.ts`'s `buildSubagentFile` is the extension point, and the prompt can grow richer (e.g., add a "refresh-template" action that runs the capture pipeline directly) without changing the install/remove/status mechanics. For now, the value proposition is pragmatic: `/use dario` inside CC beats `Ctrl+Z → dario doctor → fg` every time.
+
+## [3.25.0] - 2026-04-17
+
+### Added — Stream-consumption replay (direction #5)
+
+Native Claude Code, when it streams a response from `/v1/messages`, reads the SSE to its final event before closing the socket — even when the consumer logically already has enough (e.g., it saw the tool-use block it was waiting for). Third-party consumers routed through dario's proxy often abort mid-stream. Through v3.24, dario forwarded that abort upstream by triggering `upstreamAbort.abort()` from `req.on('close')`. Clean for billing, but "connection closed mid-stream" vs CC's "connection read to EOF" is visible on Anthropic's side. v3.25 adds an opt-in knob to replay CC's consumption pattern regardless of the real consumer's shape.
+
+- **`src/stream-drain.ts` — `decideOnClientClose` + `resolveDrainOnClose`.** Pure decision function: `(writableEnded, upstreamAborted, drainOnClose) → 'abort' | 'drain' | 'noop'`. Three branches captured explicitly so the truth table is enumerable and testable. `'noop'` covers the normal-teardown and already-aborted cases (no double-abort, no draining a finished response); `'abort'` is the pre-v3.25 default; `'drain'` is the new mode. `resolveDrainOnClose` accepts an explicit boolean override and falls through to `DARIO_DRAIN_ON_CLOSE` env (truthy set: `'1' | 'true' | 'yes'`, case-insensitive — not JS-truthy, because `'0'` shouldn't enable).
+- **`src/proxy.ts` — `onClientClose` delegates to the decision function.** The existing inline `if (!res.writableEnded && !upstreamAbort.signal.aborted) { abort }` is replaced with `decideOnClientClose(...)`. When the result is `'drain'`, the handler sets a per-request `clientDisconnected` flag instead of aborting. The 5-minute `UPSTREAM_TIMEOUT_MS` abort still fires as a hard ceiling — drain mode doesn't let a hung upstream linger forever.
+- **`src/proxy.ts` — gated writes in the streaming path.** A single `writeToClient(chunk)` helper inside the `if (isStream && upstream.body)` block short-circuits `res.write(...)` once `clientDisconnected` is true. The read loop keeps consuming the upstream SSE; the stateful transformers (analytics accumulator, `createStreamingReverseMapper` tool-use buffering, OpenAI stream translator) keep running so usage numbers are complete rather than truncated on disconnect. Every `res.write(...)` call in the streaming branch (SSE-overflow error payload, `[DONE]` sentinel, OpenAI-translated lines, streamMapper output, passthrough, buffer-flush, streamMapper tail) funnels through `writeToClient` — no exceptions.
+- **`src/cli.ts` — `--drain-on-close` flag + `DARIO_DRAIN_ON_CLOSE=1` env.** Opt-in. Default is off: keep the v3.24 behavior (mid-stream client disconnect aborts upstream) so existing users don't silently start paying for generation their consumers aren't reading. Help text includes a note that the flag trades tokens (response is fully generated even if nobody reads it) for fingerprint fidelity, bounded by the 5-minute upstream timeout.
+
+### Added — Test coverage
+
+- **`test/stream-drain.mjs`** — 30 new assertions across 7 sections: `decideOnClientClose` already-ended paths (noop regardless of drain), already-aborted paths (noop regardless of drain), drain=false default-abort branch, drain=true → drain branch, and a full 2×2×2 truth-table sweep of the 8 input combinations so any future refactor that flips a branch gets caught. `resolveDrainOnClose` coverage: explicit boolean wins over env, truthy env values (`'1' | 'true' | 'yes'`, case-insensitive), falsy-by-default behavior (including `'banana'`, `'2'`, empty string, unset — only the allowlisted truthy strings enable drain).
+
+Total test footprint: **935 assertions across 27 files** (was 905). Full `npm test` green.
+
+### Why this release
+
+Direction #5 from the "get ahead of Anthropic" roadmap. The v3.22 body-order replay and v3.23 TLS-fingerprint surfacing both closed wire-level axes; v3.24 attacked the inter-request rhythm. Stream-consumption shape is the next axis — a statistical property of how the proxy interacts with SSE that's independent of the bytes it sends. Making it default-on would silently cost users tokens; making it opt-in and documented respects users on metered accounts while giving subscription-only users a tighter fingerprint without a code change. The separation between "abort" and "drain" as named actions (vs a boolean) makes the intent explicit in the proxy code and lets future modes (e.g., "partial drain up to next `message_stop`" for finer-grained trade-offs) slot in without rewriting the call sites.
+
+## [3.24.0] - 2026-04-17
+
+### Added — Behavioral smoothing (direction #6)
+
+Real Claude Code traffic has a human-shaped rhythm between requests: sub-second during a tool-loop burst, multi-second while the user is typing, occasionally idle for minutes. A proxy that fires back-to-back at a perfect 500ms floor stands out against that rhythm over a statistically meaningful sample — the floor itself becomes visible in the long-run minimum of inter-arrival times. v3.24 replaces the hardcoded-500ms rate governor with a configurable floor plus optional uniform jitter, and lifts the config out of an env-only knob into first-class CLI flags.
+
+- **`src/pacing.ts` — `computePacingDelay` + `resolvePacingConfig`.** Pure delay calculator: given `(now, lastRequestTime, {minGapMs, jitterMs})`, returns how many ms to sleep before the next upstream fetch. Effective gap per request is `minGap + U(0, jitter)` where the RNG is injectable so tests are deterministic. The first request in a session (`lastRequestTime === 0`) is never paced — the purpose is smoothing the *gap between* requests, not delaying the first connect. Negative config values are clamped to 0 (lenient — a typoed env var shouldn't fail-loud). `resolvePacingConfig` applies precedence `explicit arg > DARIO_PACE_*_MS > legacy DARIO_MIN_INTERVAL_MS > defaults` so no existing setup regresses and invalid env strings fall through to the next source.
+- **`src/proxy.ts` — rate governor switched to the pure calc.** The inline `if (elapsed < 500) setTimeout(remainder)` block that lived at the top of the dispatch loop now delegates to `computePacingDelay`. Defaults (minGap=500, jitter=0) are identical to v3.23 behavior on the wire — opting in to jitter is the whole new surface. `-v` logs the resolved pacing config at startup so operators can confirm what's active.
+- **`src/cli.ts` — `--pace-min=MS` and `--pace-jitter=MS` flags.** Parsed into non-negative integers with a shared `parsePositiveIntFlag` helper that fails-loud on invalid values (typos on the CLI should fail, unlike typos in env — CLI is a direct user action). Wired through `ProxyOptions.pacingMinMs` / `pacingJitterMs` the same way `--strict-tls` was wired in v3.23. Help text adds both entries below `--strict-tls`.
+
+Session-ID rotation is unchanged from v3.19 (15-minute idle threshold, per-conversation in pool mode). The existing heuristic already tracks CC's observed behavior closely; revisiting it in the same release would have muddied the blast radius.
+
+### Added — Test coverage
+
+- **`test/pacing.mjs`** — 32 new assertions across 12 sections: `computePacingDelay` correctness (first-request passthrough, elapsed-exceeds-gap, insufficient-elapsed, deterministic-jitter with injectable RNG, jitter=0 short-circuits the RNG call on the hot path, negative config clamped, default RNG produces an in-range result); `resolvePacingConfig` precedence (defaults, explicit > env > legacy env > defaults, legacy `DARIO_MIN_INTERVAL_MS` still honored, new `DARIO_PACE_MIN_MS` wins over legacy, invalid/empty strings fall through, explicit 0 is valid — distinct from "unset" — and number-typed CLI args pass through alongside string-typed env args).
+
+Total test footprint: **905 assertions across 26 files** (was 873). Full `npm test` green.
+
+### Why this release
+
+Direction #6 from the "get ahead of Anthropic" roadmap. The 500ms floor that has lived in the proxy since the first public release did one job well (flood prevention) but carried the accidental second property of being a fingerprint axis: over thousands of requests, the minimum inter-arrival time trends to exactly 500ms. Any heuristic looking at the distribution shape — not just the mean — sees that clean boundary. Jitter breaks the boundary; raising `--pace-min` above the default lets operators choose a rhythm closer to their actual session pattern. This is deliberately not a distribution replay (human inter-arrival is log-normal, not uniform-on-an-interval) — that's a possible future tighten, but uniform jitter is dramatically better than no jitter and ships cleanly without statistical assumptions. The scope is kept tight so #5 (stream-consumption replay) and #2 (sub-agent hook) can land as separate, independently reviewable releases.
+
+## [3.23.0] - 2026-04-17
+
+### Added — Runtime / TLS-fingerprint axis visibility (direction #3)
+
+Proxy mode terminates TLS to `api.anthropic.com` from dario's own process, which means the ClientHello Anthropic sees is whichever runtime dario is on. Claude Code is a Bun-compiled binary, so its ClientHello is Bun's BoringSSL shape (distinct JA3/JA4 hash). Dario already auto-relaunches under Bun when Bun is on `PATH` — but when Bun isn't installed, that relaunch is a silent no-op and proxy mode quietly emits Node's OpenSSL ClientHello with no indication to the operator. v3.23 closes that blind spot: the runtime mismatch is now a first-class check with an opt-in hard guardrail.
+
+- **`src/runtime-fingerprint.ts` — `classifyRuntimeFingerprint` + `detectRuntimeFingerprint`.** Pure classifier over three inputs (`runningUnderBun`, `availableBunVersion`, `env`) so tests can exercise every combination without touching the real environment. Distinguishes three states: `bun-match` (ok — TLS matches CC), `bun-bypassed` (Node, Bun on PATH, auto-relaunch didn't fire — usually because `DARIO_NO_BUN` is set or the auto-relaunch was suppressed), and `node-only` (Node, Bun not installed — the silent mismatch case). Each state carries a human-readable `detail` + an actionable `hint`. `probeBunVersion` wraps `execFileSync('bun', ['--version'])` with a 3s timeout and output sanity checks so an unrelated `bun` binary can't poison detection.
+- **`src/doctor.ts` — new "Runtime / TLS" check.** Reports the classification between the Platform and CC-binary rows. `ok` on bun-match, `warn` otherwise with the hint inlined. Users running `dario doctor` now see the TLS axis the same way they see OAuth, pool, template drift, etc.
+- **`src/proxy.ts` — startup banner.** When `startProxy` boots under anything other than bun-match, the classification prints to stderr alongside the existing template / drift / compat warnings. Silence for known-fine environments with `DARIO_QUIET_TLS=1`.
+- **`src/proxy.ts` — `--strict-tls` flag.** Opt-in hard guardrail: refuses to start proxy mode when the classification isn't `bun-match`. For operators who want certainty that the JA3 their proxy presents to Anthropic matches Claude Code's. Omit the flag to keep the existing permissive behavior (warn-and-continue).
+
+### Added — Test coverage
+
+- **`test/runtime-fingerprint.mjs`** — 31 new assertions across 7 sections: bun-match with a version, bun-match without a version (runtime identification matters, not the version string), node-with-Bun → bun-bypassed (bypass reason defaults to `unknown`), `DARIO_NO_BUN` set → bypass reason = `DARIO_NO_BUN` + hint targets the env var, node-without-Bun → node-only (hint targets the Bun install URL and shim as the alternative, detail mentions JA3 divergence), env-not-mutated invariant (classifier is pure over its input), `DARIO_NO_BUN` set but Bun not installed still classifies as node-only (the env var is not a bypass when there's nothing to bypass).
+
+Total test footprint: **873 assertions across 25 files** (was 842). Full `npm test` green.
+
+### Why this release
+
+Direction #3 from the "get ahead of Anthropic" roadmap. Shim mode runs inside CC's own process, so its TLS stack is CC's by construction — no gap. Proxy mode is the divergent case, and the divergence was invisible to operators prior to v3.23. Making it visible doesn't *close* the gap (that needs a lower-level ClientHello rewrite, held back by the zero-runtime-deps policy), but it turns the silent axis into one operators can see and decide to act on. `--strict-tls` gives users who care an all-or-nothing knob; the default permissive behavior keeps backward compatibility. Directions #6 (behavioral smoothing) and #5 (streaming-consumption telemetry) follow in subsequent releases.
+
+## [3.22.0] - 2026-04-17
+
+### Added — Request body field order replay (fingerprint-tightening)
+
+Every top-level key in the outbound `/v1/messages` body is a potential fingerprint: JSON is semantically unordered as a type but the wire serialization IS ordered, and two bodies with the same fields in different order produce different bytes. Up through v3.21 dario tried to match CC's order by hand — `buildCCRequest` in `src/cc-template.ts` built the object literal with `model, messages, system, tools, metadata, max_tokens, thinking, context_management, output_config, stream` and a comment saying "matches CC v2.1.104 exactly." That comment is the problem: every time CC reshuffles the order or adds a field (like `output_config` did silently), dario's hardcoded order lags until someone notices and ships a point release. v3.22 replaces the hand-maintained order with one captured from the live binary.
+
+- **`src/live-fingerprint.ts` — `body_field_order` field on `TemplateData` (schema v3).** The live-capture extractor now runs `Object.keys(captured.body)` on the parsed request body and stores the result. Because V8 preserves insertion order for string keys (ES2015+) and the capture reads from JSON that was already parsed in order, the resulting array is a faithful record of CC's wire order. `CURRENT_SCHEMA_VERSION` bumps from 2 → 3; pre-v3 caches (`~/.dario/cc-template.live.json`) are rejected at load time by the existing `_schemaVersion !== CURRENT_SCHEMA_VERSION` check and the next background refresh writes a fresh one — no migration, no quarantine (schema-mismatch is an expected version-transition state).
+- **`src/cc-template.ts` — `orderBodyForOutbound(body, overrideOrder?)`.** Reorders a built body to match a captured order. Mirrors `orderHeadersForOutbound`'s contract with one intentional difference: keys are case-sensitive (JSON keys are case-sensitive, unlike HTTP headers), and the return is a plain `Record` instead of an array of pairs — `JSON.stringify` walks string keys in insertion order so the record form is sufficient to reach the wire ordered. Missing captured names are skipped (never emitted as `undefined`), duplicates are deduped (first wins), and caller-supplied extras are appended at the tail in insertion order so a future Anthropic-added field isn't silently dropped by a stale capture.
+- **`src/cc-template.ts` — `buildCCRequest` applies the replay.** The hardcoded object-literal build is kept as a deterministic fallback; `orderBodyForOutbound(ccRequest)` runs just before the function returns, so when the template has `body_field_order` the outbound key sequence matches the captured order exactly. When `body_field_order` is undefined (pre-v3.22 bundle or live cache miss), the passthrough path returns the input reference-equal — no behavior change, no overhead.
+- **Re-captured `src/cc-template-data.json` against CC v2.1.112.** The baked fallback now carries `body_field_order: ["model", "messages", "system", "tools", "metadata", "max_tokens", "thinking", "context_management", "output_config", "stream"]`, which happens to match the hardcoded build order (v2.1.112 hasn't reshuffled), so this release is a no-op on the wire for existing installs — the value is in the mechanism, not the data.
+
+### Added — Test coverage
+
+- **`test/proxy-body-order.mjs`** — 29 new assertions across 9 sections: empty-order reference-equal passthrough, captured-order preservation with `Object.keys` + `JSON.stringify` walk verification, case-sensitive matching (unlike headers — `Model` and `model` are distinct), extras-at-tail with insertion-order preservation, absent-captured-name skipping (never synthesized as `undefined`), duplicate-name dedup, empty-caller-record edge, falsy-value preservation (`0`, `false`, `''`, `null` must not be stripped by a naive truthiness check), and idempotence (`reorder(reorder(x))` is byte-identical to `reorder(x)`).
+- **`test/live-fingerprint.mjs` §"Schema v3"** — 2 new assertions + 1 updated: `_schemaVersion === 3` (was `=== 2`), `body_field_order` is an array, `body_field_order` captures the top-level keys in the caller-supplied insertion order. The prior schema-v2 section heading retitled to schema-v3 inline.
+
+Total test footprint: **842 assertions across 24 files** (was 811). Net +31: +29 from `test/proxy-body-order.mjs`, +2 from `test/live-fingerprint.mjs`. Full `npm test` green.
+
+### Why this release
+
+The deferred v3.13 roadmap item (comment at `src/live-fingerprint.ts:72-79`) called out request body field order as a known fingerprint axis that was still on "hope CC doesn't change it" footing. v3.22 closes that loop: the order is now a captured-and-replayed property rather than a hand-maintained constant, the drift watcher's existing `template.version` check catches order drift as a byproduct of the version bump, and future CC releases that add or reshuffle a top-level field (the most recent precedent: `output_config` added somewhere in the v2.1.10x series) get picked up by the next live refresh without a dario release. Part of the broader "get ahead of Anthropic" push that started with v3.19's `header_order` capture.
+
+## [3.21.0] - 2026-04-17
+
+### Added — Baked template scrubber + re-capture (dario#45)
+
+The bundled `src/cc-template-data.json` is consumed by every brand-new dario install on its very first proxy request, before the background live capture has had a chance to refresh the cache. Whatever sits in that file reaches Anthropic on that first request — which matters because the prior bake carried capture-host paths (`masterm1nd`, `DOCK`, `C--Users-masterm1nd-DOCK-Desktop-recover-dario`) baked into its system prompt. Separate from the privacy issue, user-path contamination is fingerprint-unsafe: every fresh install's first-request fingerprint briefly contained that path, which is a weak-but-real signal the request didn't originate on the user's own machine.
+
+- **`src/scrub-template.ts` — `scrubTemplate(data)`** — strips host-identifying data from a captured `TemplateData` before baking. Removes the top-level sections CC populates with per-session context (`# Environment`, `# auto memory`, `# claudeMd`, `# userEmail`, `# currentDate`, `# gitStatus`), replaces any residual user-dir paths with a `user` placeholder (`C:\Users\<name>\…`, `/Users/<name>/…`, `/home/<name>/…`, and CC's flattened `C--Users-<name>-<segments>` convention used under `~/.claude/projects`), and drops any tool whose name begins with `mcp__` (those are the capturing user's MCP server tools, not CC-canonical). Preserves every fingerprint-sensitive field verbatim: `header_order`, `header_values`, `anthropic_beta`, `tools[].name`, `tools[].input_schema` structure. Idempotent.
+- **`scripts/capture-and-bake.mjs`** — one-shot maintainer script: capture the user's own `claude` binary against a loopback MITM (same pipeline as `refreshLiveFingerprintAsync`), apply `scrubTemplate`, verify `findUserPathHits` returns 0 on the serialized result, write to `src/cc-template-data.json`. Fails loud on timeout, capture null, or residual user paths.
+- **Re-captured `src/cc-template-data.json` against CC v2.1.112.** Schema bumped from v1 → v2 so the baked fallback now ships `header_order` (23 entries), `header_values` (15 static keys), and `anthropic_beta` (7 flags) — previously only the live cache populated these. System prompt trimmed from 25,204 → 12,049 chars (host-context sections removed); tool list: 25 → 26 (`PushNotification` added upstream, 6 `mcp__*` stripped by scrub).
+- **`scripts/check-cc-drift.mjs` — scrub verification.** Two new categories: `template.user_paths` (high) fires if the baked file contains any `findUserPathHits` match; `template.mcp_tools` (high) fires if any `mcp__*` tool name slipped through. The nightly drift watcher now guards against regression in both dimensions alongside the existing OAuth / compat-range / tool-removed checks.
+- **`test/proxy-header-order.mjs`** — updated the "passthrough unchanged" assertion. Pre-v3.21, calling `orderHeadersForOutbound(headers, undefined)` fell back to the baked template's (undefined) `header_order` and returned the input record reference-equal; post-v3.21 the baked template ships `header_order`, so the hermetic form passes `[]` explicitly.
+
+### Added — Test coverage
+
+- **`test/scrub-template.mjs`** — 48 new assertions across 11 sections: Windows / macOS / Linux user-path replacement, CC flattened-path collapse, prose/non-match preservation, full section removal (`# auto memory`, `# Environment`, `# userEmail`, `# currentDate`), `mcp__*` filter with `tool_names` mirroring, tool-description + `input_schema` string scrubbing with structure preservation, fingerprint-sensitive field preservation (`_version`, `_captured`, `_schemaVersion`, `header_order`, `header_values`, `anthropic_beta`), input-not-mutated guard, `scrub(scrub(x)) === scrub(x)` idempotence, and `findUserPathHits` detector positives + placeholder-accepted negatives.
+
+Total test footprint: **811 assertions across 23 files** (was 764). Net +47: +48 from `test/scrub-template.mjs`, −1 from `test/proxy-header-order.mjs` (the `undefined` reference-equal assertion retired — see above). Full `npm test` green.
+
+### Why this release
+
+v3.19.5 deferred this re-capture precisely because a naive bake would have perpetuated the pollution — the scrub pipeline is the prerequisite. With scrub in place, the bake is safe to run on any maintainer machine: the capture goes through the MITM path, the scrub strips the host context, the drift watcher verifies the result, and the nightly `cc-drift-watch` workflow will auto-close dario#44 on its next run now that `template.version` matches `ccVersion` again. Every new dario install's first request now sees a clean, canonical CC prompt instead of the prior maintainer's git log.
+
+## [3.20.1] - 2026-04-17
+
+### Added — `--no-auto-detect` opt-out for text-tool-client auto-preserve (dario#40)
+
+v3.19.3 shipped auto-detection that flips dario into preserve-tools mode when the incoming system prompt looks like Cline / Kilo Code / Roo Code, because the alternative (CC tools in the outbound `tools` array + the client's XML protocol in the system prompt) makes the model emit `<function_calls><invoke>` that those clients can't parse. Auto-preserve fixes the edit-fail symptom but changes one field of the outbound fingerprint (the `tools` array), and @ringge raised a fair concern: operators using dario specifically for stealth/fingerprint reasons may prefer to *keep* the CC fingerprint intact and pick `--preserve-tools` per session when they need it, rather than having dario auto-flip based on a heuristic.
+
+- **`src/cli.ts` — `--no-auto-detect`** (alias `--no-auto-preserve`). When set on `dario proxy`, the text-tool-client detector is short-circuited: `detectTextToolClient()` isn't called, `detectedClient` is always `undefined`, `effectivePreserveTools` is whatever the operator explicitly chose. Explicit `--preserve-tools` still wins (explicit operator choice outranks everything); `--hybrid-tools` is unaffected (already outranked the detector).
+- **`src/cc-template.ts` — `buildCCRequest` opts extended with `noAutoDetect?: boolean`.** The detector call is gated on `!opts.noAutoDetect`. When the flag is set on a Cline/Kilo/Roo prompt, the outbound `tools` array becomes the CC canonical set (not the client's schema), which is what the operator asked for — the trade-off is that text-tool clients will see `<function_calls><invoke>` in the model output and their parsers will reject edits. Users opt into that trade-off consciously.
+- **`src/proxy.ts` — `StartProxyOptions.noAutoDetect`** threaded from CLI → proxy → `buildCCRequest`.
+- **Help text** — `--no-auto-detect` documented under Proxy options with the trade-off spelled out inline.
+
+### Added — Test coverage
+
+- **`test/client-detection.mjs` §9** — 6 new assertions: detector skipped when `noAutoDetect: true` fires on a Cline prompt, outbound tools land on CC canonical (tool name no longer `execute_command`), `noAutoDetect` + explicit `preserveTools` → preserved (explicit wins), `noAutoDetect` on a plain (undetected) client is a no-op regression guard.
+
+Total test footprint: **764 assertions across 22 files** (was 758). Full `npm test` green.
+
+### Why this release
+
+dario#40's fingerprint concern deserves an explicit operator escape hatch, not just "pick `--hybrid-tools` instead" (hybrid has its own session-injection semantics you may not want). `--no-auto-detect` is the narrow, purpose-built flag: disable only the heuristic, keep every other v3.19.3 behavior. Default is unchanged — auto-detect still fires out of the box, because that's still the right default for users who haven't thought about fingerprint trade-offs.
+
+## [3.20.0] - 2026-04-17
+
+### Added — Manual / headless OAuth flow (`dario login --manual`, dario#43)
+
+dario's OAuth flow binds a local HTTP callback on the dario host (`http://localhost:${port}/callback`) and redirects the browser back to it after consent. That works for desktop installs but breaks in two common setups: **containers** (dario in a container, browser on the host — redirect lands on the wrong host) and **headless / SSH** installs (dario on a remote box with no browser, user has a browser on their laptop). Surfaced by @adubkov in dario#28 (docker-compose with `--host=0.0.0.0 --port=30000`); previous workaround was running `dario login` on a desktop and rsync'ing `~/.dario/` onto the headless box.
+
+- **`dario login --manual`** (alias `--headless`) — mirrors Claude Code's own `claude setup-token` flow. Sends `code=true` + `redirect_uri=https://platform.claude.com/oauth/code/callback` on the authorize URL, so Anthropic renders the authorization code on a copy-paste success page instead of redirecting. dario reads the pasted code from stdin, verifies state (when present; Anthropic's success page returns `code#state`), and exchanges it against the token endpoint with the same PKCE `code_verifier`. Browser and dario can run on different hosts, different networks, or across an SSH jump.
+- **Heuristic hint before the auto flow.** When `--manual` isn't set but `detectHeadlessEnvironment()` fires — `SSH_CLIENT` / `SSH_TTY` / `SSH_CONNECTION` env vars, `/.dockerenv` present, or `/proc/1/cgroup` matches `docker|containerd|lxc|kubepods` — `dario login` prints a one-liner suggesting `--manual` before starting the auto flow. No auto-pivot: false positives are more annoying than false negatives; the user can always ignore the hint if their specific setup happens to forward the redirect.
+- **Hint on auto-flow bind failure.** When `startAutoOAuthFlow` rejects with `Failed to start OAuth callback server` / `EADDRINUSE` / `timed out`, the error output now includes `Hint: try dario login --manual for headless / container setups.`
+- **Help text updated.** `dario login [--manual]` with a one-sentence explanation of when to use it.
+
+Security posture unchanged from the auto flow: PKCE + `client_id` + single-use code + server-side code expiry. State is verified when the pasted input includes it; bare-code pastes (some browsers / copy UIs strip the `#fragment`) still exchange because state isn't load-bearing for the token endpoint (it's CSRF protection for a redirect we don't have in the manual path — the user is pasting their own code, not being redirected anywhere dario controls).
+
+### Added — Test coverage
+
+- **`test/manual-oauth-flow.mjs`** — 30 new assertions: authorize-URL shape (9 params including `code=true` and `MANUAL_REDIRECT_URI`), regression guard that manual flow doesn't re-request the `org:create_api_key` scope Anthropic rejected in dario#42, paste parser across `code#state` / bare / whitespace / empty / leading-# / multi-# inputs, SSH env-var detection (`SSH_CLIENT`, `SSH_TTY`, `SSH_CONNECTION`) with save/restore, and a negative/positive branch for the container cgroup check (CI runs containerized; test accepts either the null or the legitimate `container detected` branch).
+
+Total test footprint: **758 assertions across 22 files** (was 728). Full `npm test` green.
+
+### Why this release
+
+Containers and SSH installs were the last common setup dario couldn't unblock without friction. The "rsync `~/.dario/` from a desktop" workaround worked but required users to have *two* machines with dario installed, which is backwards for a tool whose value prop is "run it on the box that needs the API proxy." The manual flow is the same PKCE handshake Anthropic already supports for CC's own headless login — dario just wasn't surfacing it. No behavior change for desktop users: the auto flow is still the default and the heuristic hint is silent on machines that aren't SSH-ing or containerized.
+
+## [3.19.5] - 2026-04-17
+
+### Changed — `SUPPORTED_CC_RANGE.maxTested` bumped to `2.1.112` (dario#44)
+
+Nightly CC-drift watcher (shipped earlier today) flagged `@anthropic-ai/claude-code@2.1.112` as beyond dario's pinned `maxTested: '2.1.104'`, surfacing as a `[WARN] CC compat` line in `dario doctor` / `dario proxy` for users on current CC. tetsuco's v3.19.4 confirmation on dario#42 showed the same WARN against their real 2.1.112 install — the proxy still started and OAuth refreshed cleanly, so this is a soft-warn cleanup, not a fix for broken behavior.
+
+- **`src/live-fingerprint.ts` — `SUPPORTED_CC_RANGE.maxTested: '2.1.104' → '2.1.112'`.** 2.1.112 is the version tetsuco exercised end-to-end (login → proxy start → fingerprint refresh) on dario#42, so it's the right floor to call "tested" from. The `min: '1.0.0'` floor is unchanged. `checkCCCompat` now returns `ok` for CC v1.0.0 – v2.1.112; users on v2.1.113+ continue to get the `untested-above` soft warn until the next bump.
+- **Template re-capture deferred.** `cc-template-data.json` is still stamped `_version: "2.1.104"`, which the drift watcher flags as a low-severity `template.version` drift against 2.1.112. Deferring: the baked template is a seed — the runtime auto-refreshes from the user's own CC binary on first proxy run (see `refreshLiveFingerprintAsync` and tetsuco's `[dario] live fingerprint refreshed from CC 2.1.112` log), so a stale baked template only affects the very first request of a brand-new install before the background capture completes. The re-capture also needs a user-path scrubbing pass first (the current baked file contains capture-host paths). Tracked separately.
+
+### Why this release
+
+Mechanical drift-catch-up follow-up to dario#42 / dario#44. No behavior change for users who were already on 2.1.112 — just silences the spurious `[WARN]` noise and keeps `dario doctor` honest about what's actually been tested.
+
+## [3.19.4] - 2026-04-17
+
+### Fixed — `dario login` fails with "Invalid request format" on CC v2.1.107+ (dario#42)
+
+Between CC v2.1.104 and v2.1.107, Anthropic's authorize endpoint inverted its policy on the `org:create_api_key` scope for CC's prod client_id (`9d1c250a-e61b-44d9-88ed-5944d1962f5e`): the 6-scope list that dario's `FALLBACK` had been sending since v3.4.4 is now rejected with "Invalid request format", and the 5-scope user-only set (the one CC v2.1.107's own binary requests) is the only one accepted. dario#42 (tetsuco) surfaced this as a fresh-login failure on macOS — the authorize URL in the browser returned an Anthropic error before the user could ever complete consent.
+
+- **Drop `org:create_api_key` from `FALLBACK.scopes` in `src/cc-oauth-detect.ts`.** Fallback scope list now matches CC v2.1.107's n36 union: `user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload`. The scanner already extracts values from the installed binary when possible; `FALLBACK` only kicks in when the binary is missing or unscannable. History comment rewritten to reflect the policy inversion (prior note warned against dropping this scope; that warning is now inverted).
+- **Bump cache path `cc-oauth-cache-v3.json` → `cc-oauth-cache-v4.json`.** On upgrade, users regenerate the cache with the new scope list automatically — no manual `rm ~/.dario/cc-oauth-cache-v3.json` required. README and SECURITY references follow the bump.
+- **`test/oauth-detector.mjs` scope assertions inverted.** The test that previously demanded `scopes.includes('org:create_api_key')` now asserts its absence; the expected scope count dropped from 6 to 5.
+
+### Fixed — `dario login` silently burns fresh OAuth flows when refresh would have worked (dario#42, secondary)
+
+The old login flow printed `No Claude Code credentials found. Starting OAuth flow...` in two different situations: no credentials at all, and credentials present but expired. The second case was common (any long-running proxy session that didn't refresh in time) and the fresh OAuth flow it triggered was wasteful — the existing refresh token would have worked. Worse, users reading the "not found" message assumed their credentials had been deleted somewhere.
+
+- **`src/cli.ts login()` now attempts `refreshTokens()` before falling through to `startAutoOAuthFlow()`** when credentials exist but `expiresAt < Date.now()` and a `refreshToken` is present. On success, it reports the new expiry and exits; on failure, it reports why refresh failed (redacted via `sanitizeError`) and then proceeds to the OAuth flow. The fresh-OAuth fallthrough message is only printed when there are genuinely no credentials.
+
+### Why this release
+
+#42 was an outright blocker for new installs on current CC: the login URL dario generated was rejected by Anthropic before the user could see the consent page, with a generic error message that looked like a dario bug and had no actionable fix. The root cause was a policy flip on Anthropic's side that matched CC's own binary change, so the fix is mechanical — bring `FALLBACK.scopes` in line with what CC v2.1.107 actually sends. The refresh-before-fresh-flow change is a small UX correction that only bit users whose credentials had expired, but it was confusing them into deleting their `~/.dario/credentials.json` thinking something was wrong.
+
+## [3.19.3] - 2026-04-17
+
+### Fixed — Cline/Kilo/Roo tool calls appear as generic XML in client UI (dario#40)
+
+Default dario mode swaps the client's `tools` array for CC's canonical set so the upstream request looks like a real CC request. For text-tool-protocol clients (Cline, Kilo Code, Roo Code and forks) this confuses the model: it sees CC's canonical `Bash` / `Read` / `Edit` in the `tools` array but it sees the client's XML tool protocol (`<execute_command>`, `<replace_in_file>`, `<attempt_completion>`) in the system prompt. The model resolves the ambiguity by emitting Anthropic's generic `<function_calls><invoke>` wrapper — well-formed for a CC-tool client, unparseable for a text-tool client, so every edit surfaces as an error in the client UI even though the model produced a valid response. `--preserve-tools` resolves it (confirmed by @ringge on v3.19.2), but users shouldn't need to discover a flag exists to use the software.
+
+- **Auto-detect text-tool clients in `src/cc-template.ts`.** New `detectTextToolClient(systemText)` fingerprints the incoming system prompt against three identity strings (`You are Cline`, `You are Kilo Code`, `You are Roo`) and three protocol signatures (`<attempt_completion>`, `<ask_followup_question>`, `<<<<<<< SEARCH`). Identity strings are checked before `scrubFrameworkIdentifiers` strips brand names; protocol signatures survive scrubbing and catch forks that edited the identity line out.
+- **Auto-enable preserve-tools behavior in `buildCCRequest`.** When the detector fires and the operator hasn't picked `--hybrid-tools`, `effectivePreserveTools` is set to true for that request — the outbound `tools` array becomes the client's schema verbatim, message-history tool_use remapping is skipped, and the client receives the model's native XML shape. Explicit `--preserve-tools` is unchanged (still honored with or without detection). Explicit `--hybrid-tools` takes precedence over detection: operator opt-in wins, and the detector's output is still returned in `detectedClient` for logging.
+- **Detection log in `src/proxy.ts`.** First sighting of each client family ("cline", "kilo", "roo", "cline-like") emits `[dario] detected <family>-style text-tool protocol — auto-enabling preserve-tools for this client …` to stdout. Set-based dedupe so heavy traffic doesn't spam the log. Suppressed when the operator already picked `--preserve-tools` or `--hybrid-tools` (they know what they picked).
+
+### Added — Body-dump verbose mode (dario#40, @ringge feedback)
+
+`-v` alone emitted only a one-line per-request summary (method + path + billing bucket), which wasn't enough to diagnose wire-level client-compat problems without attaching a MITM. `-vv` / `--verbose=2` / `DARIO_LOG_BODIES=1` now dump the outbound request body (redacted via `sanitizeError`: bearer tokens, `sk-ant-*` keys, JWT triples) to stdout, capped at 8KB per request with a truncation marker. Default `-v` is unchanged — file content and tool output stay out of the log unless the operator opts in. Response-body logging is not in this patch; SSE stream buffering is a separate scope.
+
+### Added — Test coverage
+
+- **`test/client-detection.mjs`** — 23 new assertions across 8 cases: identity-string detection for Cline / Kilo / Roo; protocol-signature fallback via `<attempt_completion>`, `<ask_followup_question>`, and the SEARCH/REPLACE diff fence; five negatives (empty / undefined / plain prompt / CC system prompt / generic "search-and-replace" prose) to guard against false positives; auto-preserve wiring through `buildCCRequest` (tools preserved, not replaced); `--hybrid-tools` override semantics; explicit `--preserve-tools` regression guard; default-mode regression guard (no system prompt, no flag → CC remap); array-form `system` field handling.
+
+Total test footprint: **728 assertions across 21 files** (was 705). Full `npm test` green.
+
+### Why this release
+
+v3.19.1 fixed Cline's reverse-translation shape, but the default tool-swap path itself was the trap for text-tool clients — they were getting a correct-but-unparseable response format. `--preserve-tools` was the right knob, it was just undiscoverable. Auto-detection makes correct behavior the default for the clients that need it while keeping the CC fingerprint for every other client that doesn't. `-vv` closes the other half of the issue: when compat breaks on a client dario hasn't seen before, the operator can now see exactly what landed on the wire without reaching for Wireshark.
+
+## [3.19.2] - 2026-04-17
+
+### Fixed — `invalid x-api-key` 401 on live-captured templates (dario#42)
+
+Users on Max 20x and Pro subscriptions started getting `authentication_error: invalid x-api-key` (HTTP 401) against a valid, unexpired OAuth token on v3.19.1. Max 5x was unaffected by the 401 itself but produced a different downstream failure (`Unexpected value(s) 'afk-mode-2026-01-31' for the anthropic-beta header`). Both symptoms traced back to the same root cause: the schema-v2 live capture was lifting CC's on-the-wire headers verbatim into the replay template, and two of those values are only valid in the *capture environment*, not at request time.
+
+- **`x-api-key` placeholder leaked into the template.** The fingerprint spawn sets `ANTHROPIC_API_KEY=sk-dario-fingerprint-capture` and points CC at a loopback MITM, so CC emits `x-api-key: sk-dario-fingerprint-capture` on the captured request. Pre-v3.19.2 that header landed in `template.header_values` and got replayed upstream alongside the real OAuth `Authorization: Bearer` on every proxy request. Anthropic historically ignored `x-api-key` when a Bearer was present, so the bug was latent — as of 2026-04-17 some account tiers started rejecting it with a 401. `src/live-fingerprint.ts` now adds `x-api-key` to `STATIC_HEADER_EXCLUDE` so fresh captures don't store it, and `src/proxy.ts` skips `x-api-key` when overlaying `header_values` onto outbound headers so existing caches self-heal without a template refresh.
+- **`oauth-2025-04-20` beta flag was absent from captures.** CC only appends `oauth-2025-04-20` to `anthropic-beta` when it's actually using an OAuth Bearer token — the capture env uses a placeholder API key, so the flag never made it into the captured beta set. The proxy always speaks OAuth upstream, so the flag is required. `src/proxy.ts` now force-adds `oauth-2025-04-20` to the beta list if the template didn't carry it. Same reasoning applies whether the cache is fresh or stale.
+- **Generic `Unexpected value(s)` retry for tier-gated betas.** The captured template reflects whatever flags CC emits on the capture host's account tier, so a template taken on a Max 20x machine may carry flags (`afk-mode-2026-01-31`, etc.) that a Max 5x or Pro account doesn't have access to. When the upstream rejects a beta flag as `Unexpected value(s) 'X'` (HTTP 400), `src/proxy.ts` now parses the offending tokens out of the error body, strips them from the beta header, retries once, and caches the rejection per-account for the session — same shape as the existing context-1m retry. Pre-v3.19.2 behavior: the 400 propagated to the client.
+
+### Added
+
+- **Test coverage for the capture-artifact filter (`test/live-fingerprint.mjs`).** One additional assertion verifies `x-api-key` is excluded from `header_values` when present in the captured request, and the schema-v2 fixture's headers now include the real capture-env placeholder to exercise the path end-to-end.
+
+Total test footprint: **705 assertions across 20 files** (was 704). Full `npm test` green.
+
+### Why this release
+
+v3.19.0's schema-v2 capture introduced the "verbatim" principle — whatever CC puts on the wire, we replay. That's the right default for stealth, but two values (`x-api-key`, beta flag set) are environment-dependent: `x-api-key` only exists because dario's capture env forces it, and CC's beta set varies with account tier. v3.19.2 tightens the capture filter to drop the placeholder at write time, adds a defensive skip at replay time so existing caches self-heal, force-adds the oauth beta flag the capture env can't observe, and handles tier-gated beta rejections the same way long-context rejections are already handled — one retry, cached per account.
+
+## [3.19.1] - 2026-04-16
+
+### Fixed — Cline reverse-translation shape (dario#40)
+
+Two `translateBack` entries produced inputs that Cline's schema validator rejected, so every CC tool call going to a Cline client showed an error banner in the Cline UI even though the operation eventually succeeded.
+
+- **`execute_command` — `requires_approval` now emitted.** Cline's `execute_command` marks `requires_approval: boolean` as required alongside `command`. Pre-v3.19.1 the reverse map produced `{command, description?}` only, so Cline logged `execute_command without value for required parameter 'requires_approval'`. Default is `false` — CC already gates Bash upstream through its own permission model, and the borrower controls their own auto-approval settings on the Cline side.
+- **`replace_in_file` — `diff` now emitted as a SEARCH/REPLACE block.** Cline's `replace_in_file` takes `{path, diff}` where `diff` is one or more SEARCH/REPLACE blocks in the exact format specified by `cline/cline/src/core/prompts/system-prompt/tools/replace_in_file.ts`. Pre-v3.19.1 the reverse map produced `{path, old_string, new_string}` — valid for Anthropic's Edit tool, not for Cline's `replace_in_file`. Reverse now assembles `------- SEARCH\n<old>\n=======\n<new>\n+++++++ REPLACE` from the Edit input.
+
+Both raw `old_string` / `new_string` fields are removed from the reverse output so Cline doesn't see stray properties.
+
+### Added
+
+- **Regression test for Cline reverse translation (`test/issue-29-tool-translation.mjs` sections 6 and 7).** 17 new assertions covering: `execute_command` emits `requires_approval` as a boolean defaulting to `false`, `command` and `description` forwarded; `replace_in_file` emits a valid `diff` with SEARCH/REPLACE delimiters, the old_string/new_string content survives a regex round-trip from the diff block, and the raw fields are dropped.
+
+Total test footprint: **704 assertions across 20 files** (was 687). Full `npm test` green.
+
+## [3.19.0] - 2026-04-16
+
+### Changed — Stealth + robustness pass
+
+Ten targeted fixes across proxy and shim, combining a stealth audit (proxy vs. shim wire parity, behavioral fingerprints) with a broken-code/logic audit (unbounded buffers, path traversal, silent data loss). The common shape: every item was either a drift vector where proxy and shim emit different bytes for the same request, or a path where a malformed input could corrupt state instead of failing clean.
+
+**Stealth — wire parity and behavioral cadence.**
+
+- **Betas sourced from the live template (schema v2).** `src/proxy.ts` previously hardcoded the v2.1.104 `anthropic-beta` flag set (eight comma-separated flags). `src/shim/runtime.cjs` already read `tmpl.anthropic_beta` with a fallback string — so proxy and shim diverged the instant CC shipped a new beta. Proxy now loads `CC_TEMPLATE.anthropic_beta` identically and uses the same bundled-snapshot fallback. A CC beta-date bump propagates to both transports on the next fingerprint refresh, no dario release needed.
+- **Fingerprint schema v2 — `anthropic_beta` + `header_values`.** `src/live-fingerprint.ts` now captures CC's outbound `anthropic-beta` verbatim and a curated set of static header values (`user-agent`, `x-app`, `x-stainless-*`, `anthropic-version`). Excluded by construction: `authorization`, `content-type`/`content-length`/`host` (body-framing), `x-claude-code-session-id` / `x-client-request-id` (session-scoped), `anthropic-beta` (captured separately), `x-anthropic-billing-header` (rebuilt per-request from `cc_version`). `CURRENT_SCHEMA_VERSION` bumped 1 → 2; pre-v2 caches are dropped and rewritten on next refresh. The proxy's `staticHeaders` overlays `header_values` after its own defaults so any CC-side value nudge is replayed automatically.
+- **Single-account session stickiness.** `src/proxy.ts:98` previously rotated `SESSION_ID = randomUUID()` on every request, reasoning that "a persistent session ID is a behavioral fingerprint." Empirically the opposite: real CC rotates once per conversation, not per call, so a user with a distinct session-id per request looks nothing like a CC user. v3.19 keeps `SESSION_ID` stable across a conversation window (`SESSION_IDLE_ROTATE_MS = 15m`) and only rotates after an idle gap long enough to credibly indicate a new conversation. Pool mode still uses `poolAccount.identity.sessionId` (stable per account) — unchanged.
+- **FRAMEWORK_PATTERNS expansion.** Seven additional identifiers (`zed`, `plandex`, `tabby`, `amazon q`, `opencode`, `daytona`, `roo code`) added to the scrub list in `src/cc-template.ts`. Same word-boundary + path-preservation semantics as the existing set — stripped in prose, preserved inside paths and URLs (dario#35 still holds).
+- **Context-1m retry variance.** `src/proxy.ts:1078` rebuilt the reduced-beta header via `beta.replace(',context-1m-…','').replace('context-1m-…,','')` — a deterministic string-replace that leaves trailing-comma or ordering artifacts exploitable if the base set ever carries context-1m in multiple positions. Switched to `beta.split(',').filter(t => t !== 'context-1m-…').join(',')` — matches the skipContext1m fast-path exactly, and the retry shape is now byte-identical to a request that started without context-1m.
+
+**Broken-code/logic — unbounded buffers, silent truncation, path safety.**
+
+- **SSE line 413-reject.** `src/proxy.ts:1317` silently truncated SSE lines longer than 1MB with `buffer = buffer.slice(-MAX_LINE_LENGTH)`, which hid upstream protocol bugs (a runaway event stream indefinitely with the tail overwritten each chunk) and guaranteed a malformed JSON parse at the client. v3.19 emits an OpenAI-shape error marker, the `[DONE]` sentinel, and aborts the upstream read (`upstreamAbortReason = 'sse_overflow'`) so billing stops. Fails loud, fails once.
+- **BufferedToolBlock.partial size cap.** `src/cc-template.ts:1224` accumulated `input_json_delta` chunks per content block with no ceiling. A malformed upstream `tool_use` stream could OOM the proxy in-process. v3.19 caps at 2MB (`MAX_TOOL_PARTIAL_BYTES`) — on overflow, the accumulated bytes flush as a passthrough `content_block_delta`, the block is dropped from the buffered map, and subsequent deltas/stop events pass through unchanged. Client loses translation for that one block but the proxy doesn't starve.
+- **Envelope shape guard on `/v1/pool/borrow`.** `src/proxy.ts:613` forwarded `envelope.request` to Anthropic under the lender's identity without checking shape. Typed `unknown` on the wire — a borrower could waste a lender's rate-limit slot with a primitive, an array, or an object missing `model`/`messages`. v3.19 validates the minimum Anthropic `/v1/messages` shape (plain object, string `model`, array `messages`) before spending the slot; malformed envelopes get 400 locally. (Not SSRF — the upstream URL is a hardcoded `ANTHROPIC_API` constant.)
+- **Windows `.cmd`/`.bat` shell-char guard.** `src/live-fingerprint.ts` — `probeInstalledCCVersionUncached` and the fingerprint-capture spawn both use `shell: true` on Windows when the resolved binary ends in `.cmd`/`.bat` (Node 20+ / CVE-2024-27980 hardening requires it). Both paths now reject the binary if it contains any shell metacharacter (`& | > < ^ " ' % \r \n ` $ ; ( ) { } [ ]`) before spawning — `DARIO_CLAUDE_BIN` is user-controlled, so an override reaching the shell path could otherwise let cmd.exe interpret its contents.
+- **`path.basename` defense on account/backend file ops.** `src/accounts.ts` and `src/openai-backend.ts` previously joined caller-supplied alias/name directly into the filesystem path (`join(ACCOUNTS_DIR, '${alias}.json')`), so an alias like `../../etc/passwd` landed outside the accounts dir. v3.19 routes both through `safeAliasPath` / `safeBackendPath` — strips any directory component via `basename`, rejects `.`/`..`, enforces `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,63}$`. CLI input was already constrained, but the module API is importable — defense in depth.
+
+### Added
+
+- **Test coverage for the schema-v2 capture, the tool-partial cap, and the expanded framework patterns.** `test/live-fingerprint.mjs` now has 16 additional assertions covering `_schemaVersion === 2`, verbatim `anthropic_beta` capture, inclusion of fingerprint-relevant static headers, and exclusion of every auth/body-framing/session-scoped key. `test/streaming-edge-cases.mjs` adds section 8 — a 2.2MB aggregate `input_json_delta` stream verifies the mapper flushes the full payload on overflow, emits `content_block_stop`, reaches `[DONE]`, and loses no bytes. `test/scrub-paths.mjs` adds 13 assertions across the new framework identifiers (prose-strip and path-preserve both directions).
+
+Total test footprint: **687 assertions across 20 files** (was ~640). Full `npm test` green.
+
+### Why this release
+
+v3.18 closed the contract gap between dario and Anthropic's schema validator. v3.19 closes the parity gap between dario's two transports (the hardcoded proxy path had drifted from the template-driven shim path across every CC beta-date bump since v3.13) and the failure-mode gap for malformed upstreams (silent SSE truncation, unbounded tool-input buffers, and path-traversal holes that all existed since the corresponding file's first commit). Every observable dario emits now comes from the live template or fails loud — no more hardcoded strings quietly diverging as CC upgrades, and no more degraded-but-silent paths where a bad upstream corrupts a good proxy.
+
+---
+
+## [3.18.0] - 2026-04-16
+
+### Fixed — Tool-schema contract audit (dario#43)
+
+An audit of `TOOL_MAP` against CC's live `input_schema` definitions surfaced three entries that produced shapes Anthropic's schema validator would reject before the model ever saw them. Each one looked fine in isolation and had zero test coverage, so they failed only in production with clients that exercised those paths.
+
+- **WebFetch requires `prompt` (eight entries).** `web_fetch`, `webfetch`, `fetch`, `browse`, `read_url_content` (Windsurf), `web_extract` (Hermes), `fetch_webpage` (Copilot), and `browser` all produced `{url}` only. CC's WebFetch schema marks both `url` and `prompt` as required (`required: ["url", "prompt"]` in `cc-template-data.json`). A new `webFetchArgs(url, clientPrompt?)` helper injects a generic extraction prompt when the client omits one, and promotes client-side intent fields (Copilot's `query`, Hermes' `prompt`) into the CC slot when present. No API change.
+- **`message`, `ask_followup_question` (Cline/Roo), `clarify` (Hermes) → AskUserQuestion.** All three produced `{question: "..."}`. CC's AskUserQuestion requires a structured `{questions: [{question, options: [{label, description?}], header?, multiSelect?}]}` with `minItems: 2` on options. Synthesizing fake yes/no options would misrepresent what the client's agent actually asked and mislead the model about the user's real choices. The mappings are dropped. Clients that need ask-user flows should use `--preserve-tools` so their real schema flows through untouched.
+- **`notebook_read` → NotebookEdit.** NotebookEdit requires `new_source`; the old mapping supplied only `notebook_path`. Because CC has no notebook-read tool, no valid 1:1 mapping exists — a synthesized empty `new_source` with `edit_mode: 'replace'` would be silently destructive (overwrite a cell with empty content). Dropped. Clients that need it should use `--preserve-tools`.
+
+### Added
+
+- **`create_file` → Write (Copilot).** Previously round-robin'd to a fallback; now a direct map.
+- **`str_replace_editor` limitation documented.** Only the `str_replace` discriminator is translatable into CC's Edit. The `view`, `create`, `insert`, and `undo_edit` commands don't have clean 1:1 maps (view → Read, create → Write, insert → Edit with different semantics) and would silently produce empty old/new string pairs. Comment updated to point users at `--preserve-tools` for non-str_replace flows.
+- **Schema-contract regression test (`test/tool-schema-contract.mjs`).** 129 assertions. Declares one client tool per known TOOL_MAP key, runs `buildCCRequest` to get the resolved toolMap, and validates every `translateArgs` output against the corresponding CC tool's live `input_schema` from `cc-template-data.json`. Catches:
+  - Missing required fields (the dario#43 WebFetch + AskUserQuestion class).
+  - Type mismatches (string-where-array, etc).
+  - `minItems` violations on array fields.
+  - Dropped mappings re-appearing: the four intentionally-unmapped client tool names (`message`, `ask_followup_question`, `clarify`, `notebook_read`) are asserted to land in `unmappedTools` — re-adding them without fixing the shape fails the test loudly.
+  - Missing test samples: a new entry added to TOOL_MAP without a sample in the test fails with "no test sample defined."
+
+Total test footprint: **~640 assertions across 20 files** (was ~511 across 19). Full `npm test` green.
+
+### Why this release
+
+v3.17 closed the environmental flakiness gaps — disk, network, upstream binary drift. v3.18 closes the contract gap between dario's client-facing tool map and Anthropic's server-side schema validator. Three of these bugs had been in the code for months but failed silently: the client's `tool_use` got routed correctly on dario's side, then Anthropic rejected the translated shape before the model saw it, producing a 400 that looked like a client error to the user and an Anthropic error to the server logs — with dario invisible in both. The new contract test runs entirely in-process from the bundled template, so it catches the whole class of "dario built a shape CC doesn't accept" regressions at `npm test` time instead of at user-bug-report time.
+
+---
+
+## [3.17.0] - 2026-04-16
+
+### Added — Robustness pass: drift detection, compat matrix, doctor command, atomic cache, OAuth single-flight, corruption recovery, streaming audit
+
+v3.17.0 doesn't add user-facing features — it closes seven reliability gaps that only show up when the real world gets weird. Upstream `claude` updates invalidate captured templates silently. Concurrent token refreshes race. Partial disk writes corrupt the cache mid-rename. Unparseable cache files kill startup. SSE chunks arrive mid-JSON, mid-UTF-8, or mid-tool-block. Each of these had a latent path to a confused error message or a hung proxy; v3.17 makes each of them loud, recoverable, or provably handled.
+
+- **Drift detection (`src/live-fingerprint.ts`).** The live cache now carries `_schemaVersion: 1` and the captured `claude` version. On startup, `detectDrift()` probes the installed binary (`execFileSync('claude', ['--version'])`, with `shell: true` on Windows for `.cmd` shims — bounded input so CVE-2024-27980 doesn't bite) and compares. Mismatch logs a one-line warning and triggers a forced `refreshLiveFingerprintAsync({ force: true })`. Users no longer silently sit on a template captured against an older `claude` binary. `describeTemplate(t)` formats `"live capture, CC v2.1.104 (3h old)"` for the startup banner; `formatCaptureAge(iso)` handles the `30s`/`5m`/`3h`/`3d` buckets.
+- **Compat matrix (`src/live-fingerprint.ts`).** `SUPPORTED_CC_RANGE = { min: '1.0.0', maxTested: '2.1.104' }` encodes the tested band in code. `checkCCCompat()` returns `ok` / `below-min` (warn, dario may break) / `untested-above` (warn, may work) / `unknown` (no binary found). `compareVersions()` is a 60-line zero-dep dotted-numeric comparator with prerelease suffix tiebreaker — no `semver` import, per the zero-runtime-deps policy.
+- **`dario doctor` (`src/cli.ts`, new `src/doctor.ts`).** Single aggregating diagnostic command. Checks: dario version, Node (≥18 ok), platform, `claude` binary path + version + compat status, template source + age + drift, OAuth status, pool aliases + expired count, configured backends, home dir. Output is column-aligned with `[ OK ]` / `[WARN]` / `[FAIL]` / `[INFO]` prefixes; exit code is 1 if any check is `fail`, else 0. Each check is individually try/caught so one failure doesn't hide the others. Gives support threads one command to ask for instead of a screenshot dragnet.
+- **Atomic cache writes (`src/live-fingerprint.ts`).** `writeLiveCache` now goes through `atomicWriteJson(path, data)`: write to a pid-qualified `.tmp` sibling, `rename` into place. The pid suffix means two concurrent dario processes writing the same target don't clobber each other's in-flight tmp. Replaces the prior direct `writeFileSync`, which could leave a half-written cache on an OS crash mid-write.
+- **OAuth single-flight (`src/accounts.ts`).** `refreshAccountToken(creds)` wraps `doRefreshAccountToken(creds)` behind a per-alias `Map<string, Promise<AccountCredentials>>` with `.finally` cleanup. Two concurrent calls for the same alias now share one outbound `POST /oauth/token` and both resolve to the same credentials; two concurrent calls for *different* aliases still each run their own fetch. The pool's background refresh timer and a user-triggered request hitting the same alias at the same millisecond was the silent-failure case here — pre-fix it sent two refreshes, the loser invalidated the winner's refresh token, and the next request blew up trying to re-authenticate.
+- **Cache corruption recovery (`src/live-fingerprint.ts`).** `readLiveCache` now does staged validation: read → parse → structural validate → schema-check. Parse or validation failures quarantine the file (`cc-template.live.json.bad-<timestamp>`) and log a one-line stderr note; a future-version schema returns null silently (the next refresh writes a current-schema file). Before v3.17, a corrupt cache from a half-written disk or a cross-version binary downgrade would throw at startup. Now it self-heals on the next capture and keeps the bad file for post-mortem.
+- **Streaming robustness audit (`test/streaming-edge-cases.mjs`).** 23 assertions across seven sections: (1) byte-by-byte chunking produces byte-identical output to whole-input feed, (2) two concurrent `tool_use` blocks at indices 0 and 1 translate independently, (3) a tool_use with zero deltas between start and stop still emits a synthetic `{}` input, (4) a 4-byte UTF-8 emoji (🦀) split across single-byte chunk boundaries survives intact, (5) `:keep-alive` SSE comments and the `[DONE]` sentinel pass through untouched, (6a/b/c) `end()` on empty is a no-op, `end()` flushes a trailing event with no final blank line, `feed()` on an empty chunk is a no-op, (7) an empty tool map returns the zero-overhead passthrough mapper. No implementation changes — the audit caught no regressions, but locks in the behavior so future edits to `createStreamingReverseMapper` can't quietly break any of these axes.
+- **Test coverage added.** `test/drift-detection.mjs` (28 pass), `test/compat-range.mjs` (28 pass), `test/doctor-formatter.mjs` (17 pass), `test/atomic-write.mjs` (9 pass), `test/account-refresh-singleflight.mjs` (10 pass), `test/streaming-edge-cases.mjs` (23 pass). All wired into `npm test`.
+
+Total test footprint: **~511 assertions across 19 files** (was ~396 across 13). Full `npm test` green.
+
+### Why this release
+
+v3.13–v3.16 were about audience and fingerprint. v3.17 is about what happens when the machine is cold, the disk is slow, the network is flaky, or the user upgrades `claude` without restarting dario. None of those scenarios were rare — they just failed in ways that looked like dario bugs, not environment bugs. With drift detection and `dario doctor`, the diagnostic loop shrinks from "paste your logs" to "paste `dario doctor`." With atomic writes, single-flight, and corruption recovery, the three most common "dario got weird after I did X" patterns (OS crash, pool + manual refresh race, cache got truncated) stop being silent-failure paths. With the streaming audit, the one code path where a subtle off-by-one would corrupt every user's `tool_use` call for a week before anyone noticed now has lockstep coverage for chunk boundaries, UTF-8 splits, and `end()` corners.
+
+---
+
+## [3.16.0] - 2026-04-16
+
+### Added — Proxy-mode header_order replay (closes v3.13.0 deferred item)
+
+v3.13.0 captured CC's exact outbound header sequence in `template.header_order` and wired it into the shim's `rewriteHeaders`, but left the proxy emitting headers in the insertion-order Node's fetch happens to serialize. That was the explicit deferred item: *"Proxy-mode replay of header_order is deferred to v3.13.x — the same `template.header_order` field is already loaded into the proxy's template replay path and will pick up automatically when the proxy's outbound header builder is extended."* v3.16.0 extends it. Every outbound `/v1/messages` request from the proxy now serializes headers in the exact sequence CC emits on the wire, matching the shim — so header sequence is no longer a signal that distinguishes proxy traffic from shim traffic from real CC.
+
+- **`src/cc-template.ts`** — new `orderHeadersForOutbound(headers, overrideHeaderOrder?)` helper. When the live template has no `header_order` (bundled-only installs, or a capture that didn't record `rawHeaders`) it returns the input record unchanged — strict no-op, no behavior change for users who haven't run a live fingerprint capture yet. When `header_order` is present it returns an `Array<[string, string]>` of pairs in captured order. The array form is used because it's the one `HeadersInit` variant that preserves wire order under the fetch spec — a plain object gets iterated case-insensitively by the underlying HTTP library, and a `Headers` instance iterates alphabetically. Caller-supplied headers absent from the captured order (content-type, content-length, client betas that weren't in CC's capture) are appended at the tail in caller insertion order so nothing is silently dropped. Name matching is case-insensitive so the helper works equally on the proxy's mixed-case record and the shim's lowercased Map. Logic mirrors `rewriteHeaders` in `src/shim/runtime.cjs` — two transports, one wire shape.
+- **`src/proxy.ts`** — both outbound fetch call sites (main dispatch at `/v1/messages`, and the context-1m retry) now pass `orderHeadersForOutbound(headers)` to `fetch` instead of the raw record. Pool-failover paths mutate the same `headers` record in place and re-enter the main dispatch loop, so they pick up the new ordering through the main site. Passthrough mode (`--passthrough` / `--thin`) is explicitly bypassed — passthrough means "don't shape this request to look like CC," and reordering is a form of shaping; preserving that split keeps passthrough's intent intact.
+- **`test/proxy-header-order.mjs`** — 20 assertions on the pure helper. Covers: undefined/empty `header_order` returns the input record reference-unchanged (no-op), captured five-header order is preserved exactly, case-insensitive matching with case-preserving emission from the captured order, extras tail-append in caller insertion order, absent-from-caller names skipped rather than emitted as `undefined`, duplicate names in captured order deduped (first-occurrence wins), empty caller record with non-empty captured order produces an empty array. Registered in `npm test`.
+
+Total test footprint: **~396 assertions across 13 files** (was ~376 across 12). Full `npm test` green.
+
+### Why this release
+
+Closes the last of the v3.13.0 "hide in the population" deferred work. With shim mode and proxy mode now emitting identical header sequences, the remaining fingerprint vectors (TLS JA3/JA4, HTTP/2 SETTINGS, request timing, sessionId rotation cadence, body field ordering — see `src/live-fingerprint.ts` design comment) are transport-layer concerns that don't live at the outbound-header boundary. This is the cheapest lever-pull per line of code on that roadmap, and it's the one that was already designed in v3.13.0 and just needed shipping.
+
+---
+
+## [3.15.0] - 2026-04-16
+
+### Added — OpenClaw + Hermes coverage on TOOL_MAP
+
+Three new entries close out tool-name coverage for the Hermes agent framework on top of the universal `TOOL_MAP` introduced in v3.14. OpenClaw's `exec` / `process` / `web_search` / `web_fetch` / `browser` / `message` were already covered from prior releases, and Hermes's `terminal` shares the `{command}` shape of the existing `terminal` entry — so neither needed new entries, only a confirmation pass and a code comment recording the overlap. Total `TOOL_MAP` entry count: **71**.
+
+- **`src/cc-template.ts`** — three new entries. `patch` (Hermes → `Edit`, translateBack rebuilds the `{mode: "replace", replace_all: false}` envelope Hermes's validator expects). `web_extract` (Hermes → `WebFetch`, handles the `{urls: [...]}` input shape by forwarding the first URL and rebuilds the array on the return path). `clarify` (Hermes → `AskUserQuestion`). A short comment near the `execute_bash` / `terminal` region documents that Hermes's `terminal` tool routes through the existing entry unchanged, so future readers don't assume it's missing.
+
+### Why this release
+
+Pure compatibility expansion on top of v3.14. Users on Hermes (or any future framework whose `patch` / `web_extract` / `clarify` names collide with these) now route through the Claude backend without `--preserve-tools`, keeping the CC fingerprint intact. No crypto, no fingerprint, no new surface area — the point is that dario stops being the source of tool-validation failures for one more agent family.
+
+---
+
+## [3.14.0] - 2026-04-16
+
+### Added — Universal TOOL_MAP for every major coding agent (#40)
+
+Pre-mapped tool-name translations for **Cline, Roo Code, Cursor, Windsurf, Continue.dev, GitHub Copilot, and OpenHands**. Each ships its own tool schema — seven different ways to say "run a command" (`execute_command`, `run_terminal_cmd`, `run_command`, `builtin_run_terminal_command`, `run_in_terminal`, `execute_bash`), and equivalent divergence on edit / read / write / search / glob. Before v3.14 most of these needed `--preserve-tools` to route through the Claude backend without the model's outputs coming back stripped of required fields, which meant trading away the CC subscription fingerprint to make the agent work. The universal `TOOL_MAP` lifts that trade: whichever agent you're running, its tool calls translate to CC's `Bash/Read/Write/Edit/Grep/Glob/WebSearch/WebFetch` on the outbound path and rebuild to the agent's exact expected shape — including agent-specific fields CC's schema never carried — on the inbound path. Subscription fingerprint stays intact. Validator is happy.
+
+- **`src/cc-template.ts`** — 28 new `TOOL_MAP` entries plus broadened `translateArgs` alias-accept on several existing ones.
+
+  - **Bash family.** `execute_command` (Cline / Roo), `run_terminal_cmd` (Cursor, preserves `explanation` ↔ `description`), `run_command` (Windsurf, rebuilds `CommandLine` + `Blocking: true`), `builtin_run_terminal_command` (Continue.dev), `run_in_terminal` (Copilot), `execute_bash` (OpenHands, rebuilds `is_input: "false"` + `security_risk: "LOW"`).
+  - **Read family.** `view_file` (Windsurf, with `StartLine`/`EndLine` ↔ `offset`/`limit` arithmetic so line ranges round-trip), `builtin_read_file` (Continue.dev), plus `target_file` (Cursor) now accepted as an alias on the existing `read_file` mapping.
+  - **Write family.** `write_to_file` (Cline / Roo / Windsurf, with `TargetFile` + `CodeContent` aliases), `builtin_create_new_file` (Continue.dev). The existing `edit_file` was fleshed out from a bare `{ccTool: 'Edit'}` to a full args/translateBack pair that accepts Cursor's `target_file` and OpenHands's `old_str`/`new_str` aliases.
+  - **Edit family.** `replace_in_file` (Cline / Roo), `apply_diff` (Roo, `reverseScore: 1` because the true inbound shape carries a `diff` string dario can't reconstruct from `{old_string, new_string}` alone — legitimate Edit mappings win the reverse-path tie), `search_replace` (Roo / Cursor), `builtin_edit_existing_file` (Continue.dev, with `replacement` ↔ `new_string`), `insert_edit_into_file` (Copilot, with `code` ↔ `new_string`), `str_replace_editor` (OpenHands, rebuilds `command: "str_replace"` + `security_risk: "LOW"`).
+  - **Glob family.** `file_search` (Cursor, accepts `glob_pattern` / `query`), `list_dir` (Cursor / Windsurf / Copilot, `reverseScore: 3` — it's a common collision target), `find_by_name` (Windsurf, `reverseScore: 5` — highest in the Glob slot because the `{Pattern, SearchDirectory}` shape is most specific), `builtin_file_glob_search` + `builtin_ls` (Continue.dev, `builtin_ls` carries `reverseScore: 1` to yield to any real glob).
+  - **Grep family.** `grep_search` (Cursor / Windsurf, handles `Includes[]` → `glob` on the outbound path), `codebase_search` (Cursor / Windsurf / Roo / Copilot, `reverseScore: 3`), `builtin_grep_search` (Continue.dev), `semantic_search` (Copilot, `reverseScore: 2`).
+  - **Web family.** `read_url_content` (Windsurf), `fetch_webpage` (Copilot), `search_web` (Windsurf → `WebSearch`).
+
+  Tool-schema-unique fields that CC's schema doesn't carry (`is_background`, `Blocking`, `recursive`, `security_risk`, `explanation`, `CommandLine`, `AbsolutePath`, `TargetFile`, `CodeContent`, `SearchDirectory`, `Includes`, etc.) are reconstructed on `translateBack` with the agent's expected defaults so the inbound validator is satisfied. Reverse-score values on colliding entries keep the v3.9.6 / v3.12.1 disambiguation machinery working correctly when more than one agent's tools map onto the same CC slot.
+
+### Why this release
+
+The `--preserve-tools` discoverability issue surfaced in v3.8.1 and the hybrid-tools workaround from v3.9.0 both existed because dario's translator knew about Claude Code's own tools and not much else. Every agent with its own tool names was a silent failure case unless the user knew to flip `--preserve-tools` (and lose the fingerprint) or `--hybrid-tools` (and paper over the gap with request context). v3.14 makes the default mode work for the agents people actually run — no flag, no fingerprint loss, no validator errors, no issue thread. It's the biggest single audience-expansion release dario has shipped.
+
+---
+
+## [3.13.0] - 2026-04-15
+
+### Added — Session stickiness for AccountPool
+
+Multi-turn agent sessions now pin to a single account for the life of the conversation, so the Anthropic prompt cache isn't destroyed by account rotation between turns.
+
+**The problem.** Claude Max prompt cache is scoped to `{account × cache_control key}`. When the pool rotates a long agent conversation across accounts on headroom alone, turn 1 builds a cache entry on account A, turn 2 lands on account B and reads nothing from A's cache, paying full cache-create cost again. For a long agent session that's a 5–10× token cost multiplier on the cache-reused portion of every turn after the first — the exact opposite of what the pool should be doing for users.
+
+**The fix.** A new `selectSticky(stickyKey)` path on `AccountPool`. The proxy hashes a conversation's first user message into a 16-hex-char `stickyKey` (SHA-256 truncated, deterministic, trims whitespace, null on empty input), and binds the key to whichever account `select()` would have picked on the first turn. Subsequent turns of the same conversation re-use that account as long as it's still healthy (not rejected, token not within the 30s expiry grace window, headroom > 2%). When any of those conditions fails the binding rebinds to a new headroom winner — at that point the old account's cache entry for this conversation is effectively stranded until reset anyway, so there's no cost to moving. The proxy also calls `rebindSticky` on both 429 failover paths so the next turn doesn't re-select the exhausted account through a stale binding.
+
+**Why hashing the first user message.** Multi-turn agent sessions carry the same first user message on every turn (CC, OpenClaw, Hermes, Claude Code itself). Hashing it gives a stable per-conversation key without requiring client cooperation — no header to plumb, no opt-in. Conversations where the first user message is empty or whitespace-only return null and bypass stickiness entirely (delegate to plain `select()`).
+
+**Bookkeeping.** Bindings have a 6-hour TTL (matches Max's 5-hour rate-limit window plus buffer — past that point a "same" conversation is starting a fresh window anyway, so rebinding is free) and a 2,000-entry size cap with lazy O(n) cleanup on each `selectSticky` call. Removed accounts have their bindings dropped on the next cleanup pass. The `/accounts` endpoint surfaces `stickyBindings: <count>` for observability.
+
+#### What's in this release
+
+- **`src/pool.ts`** — new `computeStickyKey(firstUserMessage)` helper, `StickyBinding` interface, `STICKY_TTL_MS` / `STICKY_MAX_ENTRIES` constants, `sticky: Map<string, StickyBinding>` field on `AccountPool`, and methods `selectSticky`, `rebindSticky`, private `cleanupSticky`, plus `stickyCount` / `stickyAliasFor` test helpers. The existing `select()` is unchanged — sticky is layered on top, never replacing it.
+- **`src/proxy.ts`** — imports `computeStickyKey`, derives `stickyKey` from `extractFirstUserMessage(r)` inside the template replay path, calls `pool.selectSticky(stickyKey)` to swap to the bound account before `bodyIdentity` is built (so identity headers and access token stay consistent). Both 429 failover paths now call `pool.rebindSticky(stickyKey, nextAccount.alias)`. The `/accounts` endpoint reports `stickyBindings`.
+- **`test/pool-sticky.mjs`** — 35 assertions across 10 sections: `computeStickyKey` deterministic / whitespace-trim / null cases / 16-hex-char shape; `selectSticky` first-call binds to headroom winner; second-call returns the same account even when a different one has better headroom now (the core cache-preservation property); null key bypasses stickiness; rebind on rejected bound account; rebind on headroom collapse below 2%; rebind on token expiry; explicit `rebindSticky` from 429 failover path; null-key / unknown-alias `rebindSticky` no-ops; `cleanupSticky` drops bindings for removed accounts; multi-conversation distinct keys bind to distinct accounts and don't interfere.
+
+### Added — Sealed-sender overflow protocol (decentralized pooling, privacy layer)
+
+Trust-group members can now lend each other Claude capacity with **cryptographic unlinkability**: a lender can verify the borrower is a valid group member without learning *which* member, so no one in the pool can surveil another through borrow telemetry. This is the privacy primitive underneath the decentralized pooling model — it does not provide anonymity from Anthropic (the request still lands under the lender's attributable account), only between group members.
+
+**The primitive.** RSA blind signatures (Chaum 1983), implemented from scratch on top of Node's `crypto` module using `RSA_NO_PADDING` to get raw `m^e mod n` / `c^d mod n` primitives. Full-Domain Hash via MGF1-SHA256 (with counter retry to stay within Z_n) prevents multiplicative forgery on the signing step. The flow: the group admin signs *blinded* tokens in a batch without seeing their real values; the member unblinds locally to obtain valid RSA-FDH signatures on random tokens the admin has never seen and can never correlate to the member. When a member spends a token with a lender, the lender verifies the signature with the group public key — it proves "some member got this signed" without identifying who.
+
+**Key management.** `GroupAdmin` holds the private key, enforces per-member quotas and expiry on `signBatch`, and tracks membership in a flat map (`addMember` / `removeMember`). `GroupMember` prepares blinded batches, finalizes them locally against the admin's signed blobs, and spends tokens one at a time via `consumeToken`. `GroupLender` accepts incoming borrow envelopes, verifies signatures against the imported group public key, and prevents double-spend through a SHA-256 hash set scoped to the group — a replayed token is rejected before any Anthropic call is made.
+
+**Wire format.** `{v:1, groupId, token, sig, request}` — JSON envelope, base64url-encoded token, hex-encoded signature, the real Anthropic request body nested inside. Exports/imports via `ExportedGroupKey` let admins distribute the public key + groupId alongside per-member keypairs (admins never share the private modulus factors).
+
+**Proxy integration.** A new `POST /v1/pool/borrow` endpoint on `src/proxy.ts`, gated by the presence of `~/.dario/group.json` (populated by `exportGroupPublicKey`). The endpoint sits **before** `checkAuth` because the group signature IS the authentication — doubling it with a local API key would add nothing. On a valid borrow, the proxy delegates to `pool.select()` to pick one of the lender's local accounts and forwards the request to Anthropic under that account's identity, updating rate limits on the response. Full feature-parity with `/v1/messages` (streaming, 429 failover, reverse tool mapping) is intentionally a separate change so v3.13.0 doesn't rewrite the 1.3k-line proxy handler at the same time as shipping new crypto.
+
+- **`src/sealed-pool.ts`** — ~450 lines. BigInt helpers (`egcd`, `modInverse`), raw RSA via `publicEncrypt`/`privateDecrypt` with `RSA_NO_PADDING`, FDH with MGF1-SHA256, `blindToken` / `signBlinded` / `unblindSignature` / `verifyTokenSignature`, `GroupAdmin` / `GroupMember` / `GroupLender` classes, key export/import, wire-format helpers.
+- **`src/proxy.ts`** — `groupLender` init from `~/.dario/group.json`, `/v1/pool/borrow` handler with body-size/timeout limits, envelope decode, group match, token parse, `acceptBorrow` verification, upstream forwarding with rate-limit update. `/accounts` now surfaces `sealedSender: { groupId, seenTokens }` for observability.
+- **`test/sealed-pool.mjs`** — 57 assertions: raw RSA roundtrip, blind-signature unlinkability (admin cannot link finalized signature to the batch index), rejection of wrong-key / tampered-sig / wrong-group / double-spend cases, key export/import roundtrip, `GroupAdmin` membership + quota + expiry enforcement, `GroupMember` token finalization and spend tracking, `GroupLender` double-spend prevention under concurrent borrows, wire-format decode/encode, end-to-end two-member unlinkability proof.
+
+### Added — Live fingerprint header_order capture (hide in the population, #1)
+
+The live-fingerprint capture path (`src/live-fingerprint.ts`) now records the exact HTTP header order the real CC binary emitted, not just header values. HTTP libraries emit headers in distinctive orders — Node's alphabetical, undici's insertion-order, browsers' own specific orderings — and header sequence alone is a strong fingerprint vector for anyone trying to tell a proxy from a real client. Capturing it lets the outbound path (today: the shim; tomorrow: the proxy-mode replay) match CC exactly.
+
+- **`src/live-fingerprint.ts`** — new ~80-line design comment at the top documenting the six known fingerprint vectors (header order, TLS JA3/JA4, HTTP/2 SETTINGS, request timing distribution, sessionId rotation cadence, body field ordering) with a roadmap for incremental mitigation. `CapturedRequest` gains a `rawHeaders: string[]` field that snapshots Node's `req.rawHeaders` (flat `[k1, v1, k2, v2, ...]` array that preserves insertion order — unlike the flattened `req.headers` map, which loses it). `extractTemplate` calls a new `extractHeaderOrder(rawHeaders)` helper to walk the flat array, lowercase names, de-duplicate while preserving first-occurrence order, and store the result in `TemplateData.header_order?: string[]`. When `rawHeaders` is empty or absent (older captures, synthetic fixtures) `header_order` is `undefined` and downstream replay paths fall through to default ordering.
+- **`test/live-fingerprint.mjs`** — 7 new assertions covering `header_order` captured from rawHeaders, dedup of repeated headers (first occurrence wins), exact insertion-order preservation for a five-header capture, and the fallthrough case when `rawHeaders` is empty. Brings the live-fingerprint suite to 27 total.
+
+### Changed — Shim runtime hardening (`src/shim/runtime.cjs`)
+
+Doubling down on the in-process shim introduced in v3.12.0. The shim is the one transport Anthropic literally cannot detect without shipping signed-binary integrity checks against `globalThis` from inside their own CC binary, so it's worth making it robust enough to live there quietly across CC upgrades.
+
+- **Runtime detection.** New `detectRuntime()` checks `globalThis.Bun` / `globalThis.Deno` / `process.versions.node`. Non-Node runtimes log a warning through the existing `DARIO_SHIM_VERBOSE` channel — the shim still tries to patch `globalThis.fetch` (which all three runtimes expose) but flags that body/header semantics were only validated against Node. This is the canary for the day Anthropic ships a Bun-compiled CC: users will see the warning and know to expect quirks before they hit a silent drift.
+- **Template mtime-based auto-reload.** `loadTemplate()` now stats `cc-template.live.json` on every call and only re-reads + re-parses when the mtime changes. Previously the template was loaded once at require time and never refreshed; long-running child processes (a `claude` session running for hours) could miss a mid-session fingerprint refresh from dario's live capture. Cached instance returned for unchanged mtime so we don't stat on every intercept in the hot path is still cheap. Version transitions log through `DARIO_SHIM_VERBOSE`.
+- **Strict defensive `rewriteBody`.** The previous logic accepted `body.system.length >= 1` and invented `[1]` and `[2]` blocks out of thin air if they didn't exist — a recipe for silent corruption on the day Anthropic ships a restructured system array. Rewritten to require exactly `length === 3` with every block being `{type: 'text', text: string}`. On any mismatch the shim logs the skip reason and returns `null`, falling through to the original fetch — passthrough on a shape CC shipped without us knowing is always safer than blind replacement.
+- **`rewriteHeaders` honors `template.header_order`.** Ties the v3.13.0 header_order capture (above) directly into the shim: when the template carries a `header_order`, the shim rebuilds the outgoing header list in that exact sequence, appending any caller-supplied extras at the tail. The return type changed from `Headers` to `Array<[name, value]>` — a valid `HeadersInit` — because `Headers` iteration is spec-sorted alphabetically, which would destroy the captured order. An array of pairs is the one `HeadersInit` variant that guarantees wire order is preserved by fetch()'s HTTP layer.
+- **`checkVersionDrift`.** New helper logs (verbose only) when the child's `user-agent` cc_version differs from the template's, so a CC upgrade landing during a stale-cache window is visible in logs instead of silently impersonating the old version. The shim still overrides the user-agent regardless — this is a debug signal, not an error path.
+- **`test/shim-runtime.mjs`** — 21 new assertions (47 total, up from 26) covering: runtime detection identifies Node, `loadTemplate` caches on unchanged mtime and reloads on bumped mtime, `rewriteBody` strict shape rejects `length=1` / `length=4` / missing-system / non-text-block bodies and accepts the correct three-text-block shape, `rewriteHeaders` honors `header_order` (five captured headers replayed in exact order with extras tail-appended, user-agent still overridden to template version), `rewriteHeaders` no-op path keeps old behavior when `header_order` is absent, `checkVersionDrift` handles null / mismatched-UA / no-cc-UA / missing-template edge cases without throwing.
+
+Total test footprint: ~376 assertions across 12 files. Full `npm test` green.
+
+### Why this release
+
+v3.13.0 is about **fighting back against fingerprinting — at every layer at once.** Session stickiness is the economic layer: it makes pool mode actually cache-cheap for long agent sessions, where dario's bill is dominated by cache-reused tokens. Sealed-sender is the social layer: it makes group-pooling models possible without one member having to trust every other member's honesty about borrow telemetry. Header-order capture is the transport layer: it removes one of the easier fingerprint vectors from every outbound replay path the shim sees. Shim hardening is the stealth layer: it makes the one transport Anthropic can't detect from outside their own process robust enough to carry a session through CC upgrades and body-shape drift. Stickiness and header_order feed directly into shim hardening — option 2 (hide in the population) handing captured shape to option 1 (in-process replay) is where the layers physically connect in `rewriteHeaders`.
+
+Proxy-mode replay of `header_order` is deferred to v3.13.x — the shim is the higher-leverage target today because it's the transport that most directly exposes header order to Anthropic's fetch layer, but the same `template.header_order` field is already loaded into the proxy's template replay path and will pick up automatically when the proxy's outbound header builder is extended.
+
+---
+
+## [3.12.1] - 2026-04-15
+
+### Fixed
+
+- **`src/cc-template.ts`** — tool dispatcher regression (#37 Glob half, also #36). When a client declared an unmapped tool that round-robin'd onto a CC fallback tool Anthropic also emits directly (Glob in the OpenClaw `image` / `memory_get` repros), the reverse lookup routed real upstream tool_use blocks back to the unmapped client tool with the wrong input shape — which then failed the client's own input validation (`{"tool":"image","error":"image required"}`) and could trigger a runaway loop if the client retried. Unmapped-fallback mappings now carry `reverseScore: 0`, and `buildReverseLookup` skips any mapping with score 0 entirely. If no legitimate mapping claims a CC tool, the upstream tool_use passes through unchanged — the client sees an honest unhandled-tool case instead of a corrupted-shape masquerade.
+
+  Bash-half fix from v3.10.3 (process/exec collision on Bash) is unchanged and still covered; the new logic generalizes the same "unmapped fallback must lose reverse collisions" principle to every CC fallback slot, not just Bash.
+
+- **`test/hybrid-tools.mjs`** — 4 new assertions covering the Glob-half repro directly (unmapped `image` round-robin'd onto Glob, real Glob tool_use passes through with name preserved and input intact) plus a legitimate-mapping-wins case (`find_files` + `image` sharing Glob's slot, legitimate mapping claims the reverse path).
+
+### Why this release
+
+@tetsuco's #37 and `boeingchoco`'s #36 both reported the same OpenClaw symptom: Bash tool calls returning "Unknown action" and Glob tool calls misrouting to `memory_get` / `image` with validation errors. v3.10.3's `reverseScore: 1` on `process` closed the Bash half. The Glob half stayed open because the pre-fix round-robin fallback didn't distinguish forward-only distribution from reverse-path claiming — both used the same `ToolMapping` shape and both competed for the reverse slot at the same score. v3.12.1 draws that line explicitly.
+
+---
+
+## [3.12.0] - 2026-04-15
+
+### Added — Shim mode (experimental, opt-in)
+
+A second transport for routing CC traffic through dario, alongside the existing proxy. Where proxy mode runs an HTTP server and asks CC to talk to it via `ANTHROPIC_BASE_URL`, **shim mode** injects a `--require` CommonJS payload into a CC child process via `NODE_OPTIONS`, monkey-patches `globalThis.fetch` inside that process, and rewrites outbound `/v1/messages` calls in-place. CC keeps its own OAuth, its own retry/streaming machinery, its own TLS — dario only intercepts the request body (template replay) and the response headers (billing attribution).
+
+The point: detection cost. Anthropic can fingerprint a proxy via TLS, headers, IP, or `BASE_URL` env. They can't easily detect a fetch monkey-patch from inside their own process without shipping signed-binary integrity checks against `globalThis`, and even then the shim runs *before* CC code loads, so it could patch the integrity check too. This is "get ahead of Anthropic" part 2 — part 1 was live fingerprint extraction in v3.11.0.
+
+**Why it's not the new default.** dario's value prop is "one endpoint, every provider, your tools don't need to change," and that requires an HTTP boundary so the same dario can serve CC + OpenClaw + Hermes + raw curl simultaneously, share an OAuth pool across all of them, do failover, and expose `/analytics` to a dashboard. Shim mode only intercepts the one specific child you spawn; it can't multiplex clients, can't share pool state across separate child processes, and is Node-only — if Anthropic ships CC as a Bun or single-binary build, shim mode is dead and proxy mode is the only path. **Proxy stays the router; shim is the stealth escape hatch.** Pick shim when (a) you're only running CC, (b) you suspect Anthropic is fingerprinting your proxy traffic, (c) you accept the Node-only constraint.
+
+#### What's in this release
+
+- **`src/shim/runtime.cjs`** — hand-written CommonJS payload, ~180 lines. Loaded into the child via `NODE_OPTIONS=--require=...`. Exports nothing user-facing; activated by `DARIO_SHIM=1` (so it's a no-op if dario installs it globally and the child isn't a CC invocation). Patches `globalThis.fetch`, gates on POST + `*.anthropic.com/v1/messages`, replaces `body.system[1]` and `body.system[2]` with the live-fingerprint template's agent identity and system prompt, replaces `body.tools` from the template, and sets fingerprint headers (`user-agent: claude-cli/X.Y.Z (external, cli)`, `x-anthropic-billing-header`, `anthropic-beta`). Failsafe: any internal error falls through to the original fetch — the shim cannot break the host process.
+- **`src/shim/host.ts`** — dario-side spawn host. Stands up a unix domain socket (or named pipe on Windows), spawns the user's command with the shim require'd in via `NODE_OPTIONS`, listens for newline-delimited JSON billing relay events from the runtime, and feeds them into the existing `Analytics` class so they show up in `/analytics`-style summaries (request counts and claim distribution; token costs are not recorded by the shim transport because that would require parsing SSE bodies in the child, which is the kind of cost-and-complexity we explicitly chose to avoid).
+- **`src/cli.ts`** — new `dario shim [-v] -- <command> [args...]` subcommand. Pass-through stdio, propagates the child's exit code, optional verbose log of relay events at the end. Example: `dario shim -- claude --print -p "hi"`.
+- **`src/shim/runtime.cjs` is copied into `dist/shim/`** by the build script (alongside the existing `cc-template-data.json` copy). The host module's `locateShimRuntime()` checks both `dist/shim/runtime.cjs` (production) and `src/shim/runtime.cjs` (dev under tsx).
+- **`test/shim-runtime.mjs`** — 26 unit assertions covering the URL gate (literal `anthropic.com` host, suffix-attack rejection, localhost passthrough), the method gate (POST-only), the body rewriter (billing tag preserved, agent identity replaced, system prompt replaced, cache control preserved, tools replaced, messages untouched, model untouched, null on garbage), and the header rewriter (user-agent, billing header, anthropic-beta, existing headers preserved).
+- **`test/shim-e2e.mjs`** — 15 cross-process assertions. Spawns a real `node -e` child with the shim CJS require'd in, hits a local HTTP server pretending to be `api.anthropic.com`, and verifies on the wire that the body was rewritten (billing tag preserved, identity/prompt/tools replaced) and that the header rewrite landed (`user-agent: claude-cli/9.9.9-e2e (external, cli)`). Also covers the relay socket transport: child writes a newline-delimited JSON event to the unix socket, host parses it, billing claim is round-tripped end-to-end.
+
+Total test footprint: 241 assertions across 10 files (was 200 across 8). Full `npm test` green.
+
+#### Deferred to v3.12.x / v3.13
+
+- Auto-detect Bun in the child and refuse with a clear error (Bun's `--require` semantics differ; needs verification before claiming support).
+- `dario shim --replace claude` global wrapper install (drop a `claude` shim into PATH that re-execs into `dario shim -- /path/to/real/claude`).
+- Token cost recording (would require the runtime to parse SSE bodies in-flight; intentionally not in v3.12.0).
+- Windows named-pipe coverage in CI (host code paths exist; CI matrix doesn't currently exercise them).
+- README section and `--help` example walkthrough.
+
+---
+
+## [3.11.1] - 2026-04-15
+
+### Added — Billing bucket visibility (#34)
+
+- **`src/analytics.ts`** — new `BillingBucket` type and `billingBucketFromClaim()` pure helper that maps the raw `anthropic-ratelimit-unified-representative-claim` header value (`five_hour`, `five_hour_fallback`, `overage`, `api`) to a user-friendly bucket (`subscription`, `subscription_fallback`, `extra_usage`, `api`, `unknown`). `Analytics.computeStats()` now produces `billingBucketBreakdown` (per-bucket counts) and `subscriptionPercent` (share of *classified* requests that hit a subscription bucket — the headline "is dario actually routing me through my subscription?" number) on every `/analytics` summary.
+- **`src/proxy.ts`** — the per-request billing log line now leads with the friendly bucket: `billing: subscription (five_hour, overage: 0%)` instead of forcing users to memorize that `five_hour` means subscription. The raw claim is still shown in parentheses for parity with the underlying header.
+- **`test/analytics-billing-bucket.mjs`** — 23 assertions covering pure derivation across every enum value (including `null`/`undefined`/garbage → `unknown`), mixed-bucket aggregation (8 subscription + 1 extra_usage + 1 unknown → `subscriptionPercent ≈ 88.89%`), the clean 100% case, the @mikelovatt silent-drain scenario from #34 (10 `overage` requests → `subscriptionPercent === 0`, the alarm), and empty-state divide-by-zero safety.
+
+### Why this release
+
+Closes #34. The original #31 work added the raw `claim` header to logs and analytics, but users still had to know that `five_hour` = subscription and `overage` = paying out of pocket. @mikelovatt's complaint was that dario *appeared* to be routing through his subscription while extra_usage was silently burning his real balance — `subscriptionPercent < 100%` is now a one-glance answer to that question, surfaced in `/analytics` and in the per-request log line.
+
+---
+
+## [3.11.0] - 2026-04-15
+
+### Added — Live fingerprint extraction
+
+- **`src/live-fingerprint.ts`** — new module. At dario proxy startup, spawns the user's own `claude` binary against a loopback MITM endpoint, captures its outbound `/v1/messages` request, and extracts the live agent identity, system prompt, tool definitions, and CC version from the captured body. Writes the result to `~/.dario/cc-template.live.json` with a 24h TTL. Template replay reads the live cache at module init, falling back to the bundled `cc-template-data.json` snapshot only when the live cache is absent.
+
+  This eliminates the "Anthropic ships a new CC, dario is stale for 48 hours" window. Every dario install with CC available self-heals to the current CC fingerprint on next startup. No user action, no flag, no opt-in — it runs in the background on every `dario proxy` launch and never blocks startup. Users without CC installed see the exact same behavior as before.
+
+  The capture uses a single loopback HTTP server on a random high port, returns a minimal-valid SSE stream so CC completes cleanly, kills the child on capture, and writes the result atomically. Hard-timeout is 10 seconds; failures log a one-line warning and fall through to the bundled snapshot. Security boundary: the MITM only accepts 127.0.0.1, only lives for one request, and the child is killed immediately after the body is read. CC's OAuth token never leaves the machine — we hand CC a URL it already trusts because we set `ANTHROPIC_BASE_URL` in its environment.
+
+- **`test/live-fingerprint.mjs`** — 20 assertions covering: happy-path extraction from a synthetic CC-shaped request, version parsing from `x-anthropic-billing-header`, user-agent fallback when the billing header is absent, null-return on malformed bodies (missing system, short system, empty tools), live cache preference over bundled, and bundled fallback when no cache exists.
+
+### Changed
+
+- **`src/cc-template.ts`** — template loading delegates to `loadTemplate()` from `live-fingerprint.ts` instead of reading `cc-template-data.json` directly. The bundled snapshot is still shipped and still loaded when no live cache exists — behavior is a strict superset of pre-v3.11.
+- **`src/proxy.ts`** — on `startProxy()`, kicks off `refreshLiveFingerprintAsync()` in the background right before `server.listen()`. Fire-and-forget; errors are swallowed. The refresh result is written to cache for the **next** dario startup, so the first run after this upgrade still uses the bundled snapshot and every subsequent run uses live data.
+
+### Why this release
+
+Fingerprint maintenance has been a manual treadmill: every CC release could in principle shift the agent identity, tool schemas, or the system prompt, and until we updated `cc-template-data.json` any new user would be running a stale template. Live capture makes the treadmill self-service — each user's dario pulls the fingerprint from their own CC install at startup, so template replay is always in sync with whatever CC version is actually installed locally, without any dependency on us shipping updates.
+
+This is part 1 of a two-part "get ahead of Anthropic" plan. Part 2 (shim-mode, NODE_OPTIONS injection into a live CC process, discussed in the architecture notes) is not in this release — it's a larger change and will land as v3.12 opt-in.
+
+---
+
+## [3.10.3] - 2026-04-15
+
+### Fixed
+
+- **`billing: five_hour (overage: ?)` log spam** (`src/proxy.ts`, follow-up to #37). Anthropic omits the `anthropic-ratelimit-unified-overage-utilization` header when the subscription claim fully covered the request and no overage bucket was consumed. Pre-fix, dario treated the missing header as an unparseable value and printed `?`, which looked like a broken parser even though routing was working correctly — every request in @tetsuco's #37 log dump showed `overage: ?` despite the `five_hour` claim being correct.
+
+  Fix: when the overage header is absent and the claim is `five_hour` (or `five_hour_fallback`), display `0%` instead of `?` — the subscription covered the request, so overage consumption is zero by definition. If headers are missing entirely (non-200 responses, server errors), verbose mode now logs `billing: headers absent (status=N)` so the gap in the request numbering is explained instead of silent.
+
+---
+
+## [3.10.2] - 2026-04-15
+
+### Fixed
+
+- **Runaway request loop on OpenClaw / framework clients that preserve trailing assistant turns** (`src/cc-template.ts`, #37). v3.10.1's trailing-turn-drop fix was too aggressive: it popped **any** trailing assistant message, not only empty ones. When an agent framework locally appended its model's reply to conversation state and asked the model to continue, dario stripped the assistant turn from the next upstream request. The model never saw its prior reply, regenerated essentially the same response, dario stripped that, and the loop never terminated. @tetsuco reproduced with a single "check Bash/Glob availability" prompt that resulted in 133 POSTs to `/v1/messages` before hitting rate limits and 500s — billing classification held (`five_hour` on every request), so this was purely a loop, not a reclassification.
+
+  Fix: narrow the post-condition pass to drop **only** trailing messages with empty content (`content: []`), which is what the thinking-strip actually produces for a thinking-only turn. Trailing assistant messages with real text or tool_use content are left intact. The original #36 prefill-rejection case is still covered because the failing shape was specifically `content: []` after the strip.
+
+### Changed
+
+- **`test/hybrid-tools.mjs`** — the v3.10.1 regression case that asserted "trailing assistant with real content is dropped" is inverted to "trailing assistant with real content is preserved", and tagged as #37 to match the regression it now guards against. The thinking-only-drop case and the well-formed-conversation-untouched case are unchanged.
+
+---
+
+## [3.10.1] - 2026-04-15
+
+### Fixed
+
+- **`LLM request rejected: This model does not support assistant message prefill. The conversation must end with a user message.`** (`src/cc-template.ts`, #36). Clients that preserve `thinking` blocks in conversation history (OpenClaw, Hermes) would intermittently hit this error on Opus 4.6 under adaptive thinking + the `claude-code-20250219` beta. Root cause: an interrupted prior turn whose assistant content was thinking-only would be emptied to `content: []` by dario's thinking-strip, then forwarded with the envelope still in place. Anthropic's server interprets a trailing assistant message as a prefill request, and the model/beta combination rejects prefill outright.
+
+  Fix: after the thinking-strip loop, a post-condition pass drops any trailing message that is empty-after-scrub or still has `role: "assistant"`. The client's original shape is not mutated beyond what was already going to be scrubbed, and a well-formed conversation ending on a `tool_result` (user role) is untouched. Credit to @boeingchoco for the reproduction.
+
+### Added
+
+- **`test/hybrid-tools.mjs`** — three regression cases for the trailing-turn fix: thinking-only assistant turn dropped, real-content trailing assistant dropped, well-formed tool-loop conversation untouched.
+
+---
+
+## [3.10.0] - 2026-04-14
+
+Repositioning + new routing primitive. No bug fixes, no breaking changes.
+
+### Added
+
+- **Provider prefix in `model` field** (`src/proxy.ts`). Requests can now use `<provider>:<model>` in the `model` field to force backend routing regardless of model-name regex. Recognized prefixes: `openai:`, `groq:`, `openrouter:`, `local:`, `compat:`, `claude:`, `anthropic:`. The prefix is stripped before the request goes upstream — the backend sees the bare model name.
+
+  Example: `openai:gpt-4o` forces the OpenAI-compat backend; `openrouter:meta-llama/llama-3.1-70b` routes a non-GPT model through the OpenAI-compat backend without modifying the default regex; `claude:opus` explicitly forces the Claude subscription backend.
+
+  Ollama-style names like `llama3:8b` (colon used for tag, not provider prefix) pass through untouched — only recognized prefixes are parsed.
+
+- **`--model` accepts provider prefix** (`src/cli.ts`, `src/proxy.ts`). `dario proxy --model=openai:gpt-4o` applies the prefix to every request server-wide. Useful for one-flag routing override without editing every tool's config. Back-compat: `--model=opus` and full Claude IDs still work as before.
+
+- **`test/provider-prefix.mjs`** — 16 assertions covering prefix detection, stripping, ollama compat, edge cases (empty, uppercase, unknown providers), and path-containing model names (`openrouter:meta-llama/llama-3.1-70b`).
+
+### Changed
+
+- **README repositioned as multi-backend gateway.** The framing shift: dario is a local endpoint your tools point at; backends are swappable adapters behind it. Claude subscription remains the most sophisticated backend (template replay, fingerprint, pool mode), but is now presented as one of several, not the headline identity. Bullet order in "What it is" now leads with OpenAI / OpenAI-compat and places the subscription backend third. "Who this is for" gains a provider-independence audience. "Why switch" gains a provider-independence paragraph. The durable proposition — "your tools point at one URL, backends swap underneath, nothing in your tools changes" — is now the top-line pitch.
+
+### Why this release
+
+A response to the obvious trajectory: Anthropic will keep tightening subscription-shaped routing, and every tightening becomes a dario issue. Provider prefix + gateway framing is the first step toward making dario useful even in a future where the Claude subscription backend degrades. Users with an OpenAI key, a Groq key, a local LiteLLM, or any other OpenAI-compat endpoint get one stable local URL and can route between them with a model-name change. Claude subscription remains fully supported and will continue to get bug fixes — it's just no longer the sole story.
+
+---
+
+## [3.9.6] - 2026-04-14
+
+Fixes [#37](https://github.com/askalf/dario/issues/37) reported by [@tetsuco](https://github.com/tetsuco) on v3.9.3. The `Read`-on-directory symptom from #35 was fixed in v3.9.3, but two related symptoms (`Bash → Unknown action`, `Glob → image handler misroute`) remained under OpenClaw. v3.9.5 resolved the Glob misroute (hybrid mode now drops unmapped tools like `image`). This release resolves the Bash collision.
+
+### Fixed
+
+- **`buildReverseLookup` now resolves ccTool collisions by `reverseScore`** (`src/cc-template.ts`). When multiple client tools map to the same CC tool, the pre-fix two-pass reverse lookup used insertion-order last-wins. OpenClaw declares BOTH `exec` (bash-family, wants `{command}`) AND `process` (action-discriminator, wants `{action}`) as sibling tools — both exported from [`src/agents/bash-tools.ts:8-10`](https://github.com/openclaw/openclaw/blob/main/src/agents/bash-tools.ts) and registered together in the default agent tool set. Both map to CC's `Bash`. Depending on the order OpenClaw emitted them in the request, `process` could win the reverse slot, and every subsequent CC `Bash` tool call came back rewritten to `{action: "<command string>"}` — OpenClaw's process handler saw the command as an action name and threw `Unknown action pwd` / `Unknown action ls` / etc. for every shell call.
+
+  Fix: `ToolMapping` now carries an optional `reverseScore` (default 10). The non-identity pass of `buildReverseLookup` picks the highest-scoring mapping per ccTool instead of last-wins. `process` has `reverseScore: 1` so when it collides with `exec`/`bash`/`shell`/`run`/`command`/`terminal` (all default score 10), the bash-family mapping always wins and CC's Bash tool calls round-trip correctly as `{command: "..."}`.
+
+  Score wins over insertion order in either direction — test covers both orderings of `[exec, process]` and `[process, exec]` to pin this.
+
+### Added
+
+- **5 new collision-resolution tests** in `test/hybrid-tools.mjs`. Declares both `exec` and `process`, emits a CC `Bash` tool_use, asserts the reverse path routes to `exec` and the input carries `command` (not `action`). Both declaration orders tested. Suite total: 38 pass / 0 fail.
+
+## [3.9.5] - 2026-04-14
+
+Second fix for [#36](https://github.com/askalf/dario/issues/36). v3.9.4 fixed the `context-1m` retry loop; this release tackles the hybrid-tool reverse-mapping issues in the same report after pulling OpenClaw's source and reading their actual tool definitions. Two real bugs, one honest design admission.
+
+### Fixed
+
+- **`bash`-family `translateBack` now emits `command`, not `cmd`** (`src/cc-template.ts`). The `bash`, `exec`, `shell`, `run`, `command`, and `terminal` entries in TOOL_MAP were all emitting `{cmd: <CC command>}` on the reverse path. But every real client using one of those tool names — Anthropic's own standard `bash` convention, OpenClaw's `exec` (verified against [apps/shared/.../bash-tools.exec.ts:1340](https://github.com/openclaw/openclaw/blob/main/src/agents/bash-tools.exec.ts) where the handler does `params.command` and throws "Provide a command to start." on missing field) — declares `command` on its schema, not `cmd`. The translation was writing into a field nobody had declared. Changed to emit `{command: ...}` across all six bash-family aliases. `process` still emits `{action}` (OpenClaw's `process` session-manager tool actually wants `action` as the discriminator, verified against `bash-tools.process.ts:127`).
+
+- **Hybrid mode now drops unmapped tools instead of round-robin'ing them onto CC fallbacks** (`src/cc-template.ts`). OpenClaw declares ~50 custom tools (`lobster`, `memory_get`, `memory_search`, `feishu_*`, `discord_*`, ...), none of which are in dario's TOOL_MAP. Pre-fix, the unmapped-tool distributor assigned them round-robin onto `[Bash, Read, Grep, Glob, WebSearch, WebFetch]`. Forward direction: the model saw CC's tool set and called `Grep` with a pattern. Reverse direction: dario renamed `Grep` → `lobster` and handed OpenClaw `{pattern: "..."}` on a tool whose handler expected `{action: "run"|"resume"}` and threw `Unknown action: undefined`. "Glob misrouted to memory_get" was the same mechanism: round-robin collision plus no reverse-shape fidelity.
+
+  The hybrid-mode contract can't support this — adding custom tools alongside CC's set would break the fingerprint that makes hybrid mode worth using in the first place. Honest fix: in hybrid mode, drop unmapped tools at request build time. The model upstream never sees them, never calls them, never corrupts anything. `buildCCRequest` still reports them in the returned `unmappedTools` array so the caller (and future verbose logging) can surface which tools were dropped. **Default mode is unchanged** — round-robin fallback still applies there so existing simple clients don't regress.
+
+### Known limitation (now documented in code)
+
+- **`process`-style action-discriminator tools are fundamentally lossy under any TOOL_MAP translation.** OpenClaw's `process` tool takes `{action: "list"|"poll"|"log"|..., sessionId?, data?, keys?, hex?, literal?, text?, bracketed?, eof?, offset?, limit?, timeout?}`. Flattening the action onto `Bash.command` loses every sibling field, so the model upstream can only ever drive a subset of the tool's functionality. The TOOL_MAP.process entry is still present so the fingerprint check stays green and `process.action` still round-trips correctly for the one field it maps, but a comment now warns that clients with rich discriminator tools should use `--preserve-tools` rather than rely on hybrid mode to do the impossible.
+
+### Added
+
+- **12 new hybrid-tools test assertions** (`test/hybrid-tools.mjs`): exec/bash reverse translation produces `command`, no stale `cmd` field leaks through, hybrid mode drops lobster + memory_get from activeToolMap, default mode still round-robins them (regression guard). Suite total: 33 pass / 0 fail.
+
+### Methodology note
+
+v3.9.4 asked @boeingchoco for OpenClaw's tool schema to diagnose the remaining #36 issues. The user (correctly) pointed out that OpenClaw is open-source on GitHub and the schemas are one `git clone` away. Cloned `openclaw/openclaw` main, grepped for the relevant tool definitions, and the three bugs above were visible within ten minutes. Should not have outsourced that lookup.
+
+## [3.9.4] - 2026-04-14
+
+Fixes a verbose-log flood reported by [@boeingchoco](https://github.com/boeingchoco) in [#36](https://github.com/askalf/dario/issues/36): on accounts without the context-1m beta entitlement, dario was re-sending `context-1m-2025-08-07` with every request, eating a 400/429 + retry round-trip per POST for the whole session.
+
+### Fixed
+
+- **Cache context-1m rejection per account** (`src/proxy.ts`). The first time an account returns a `long context`-shaped 400/429, dario records that on the session's `context1mUnavailable` set (keyed by pool alias, or `__default__` in single-account mode) and skips `context-1m-2025-08-07` from the outgoing `anthropic-beta` header on every subsequent request for that account. Pool failover does not share the flag across accounts — each account proves its own context-1m eligibility on its first request. The verbose log for the rejection now only prints the first time (with `(cached for session)` appended) so long sessions don't spam one rejection line per request.
+
+  Impact: a subscriber on a plan without the long-context add-on was paying ~2× the latency and ~2× the upstream request count for every message. After v3.9.4 they pay it exactly once per account per process lifetime.
+
+### Known limitations (reported in #36, not yet fixed)
+
+- **Hybrid tool mode reverse mapping under OpenClaw still has rough edges.** @boeingchoco's report showed `Bash` returning "Unknown action", `Glob` getting misrouted to an internal `memory_get`, and `Read` being called with a directory path. These look like reverse-mapping (tool-name or tool-shape) mismatches between CC's tool set and OpenClaw's schema, but we need OpenClaw's full tool definition JSON to reproduce. Left #36 open pending that schema.
+- **`overage: ?` in verbose logs** is the same response-header-missing symptom as the first-request retry path — expected to mostly resolve itself with the rejection cache above, since subsequent requests go through the normal response-header code path and carry the expected `anthropic-ratelimit-unified-overage-utilization` header.
+
+### Credit
+
+[@boeingchoco](https://github.com/boeingchoco) — third time this user has surfaced a high-value bug (#23, #29, #33 were prior). The full verbose log dump with requests #0 through #24 showed the retry-every-request loop immediately — would have taken much longer to reproduce synthetically.
+
+## [3.9.3] - 2026-04-14
+
+Fixes [#35](https://github.com/askalf/dario/issues/35) reported by [@tetsuco](https://github.com/tetsuco) — `scrubFrameworkIdentifiers` was corrupting filesystem paths that contained a framework name. `/Users/foo/.openclaw/workspace/` was being rewritten to `/Users/foo/./workspace/` because the `\b` word boundary in the identifier regexes fired between `.` and `o`, so the scrub treated the path segment as prose.
+
+### Fixed
+
+- **`scrubFrameworkIdentifiers` now skips matches embedded in path or URL contexts** (`src/cc-template.ts`). The replacement callback inspects the character immediately before and after each match and preserves the identifier when it's adjacent to `.`, `/`, `\`, `-`, or `_` — strong signals that the token is part of a filesystem path, URL, or slug rather than prose. Standalone prose identifiers ("powered by openclaw", "running openclaw with aider") still scrub as before.
+
+  Affected users: anyone running `--hybrid-tools` (or any CC-template path) with a client whose workspace, config, cache, or log directory contains a framework name — OpenClaw's `~/.openclaw/workspace/` is the reproducer, but `/tmp/aider-cache`, `~/.cursor/settings.json`, and similar paths were all at risk of silent corruption on the upstream request.
+
+### Added
+
+- **`test/scrub-paths.mjs`** — 11 assertions covering the path-preservation fix: unix hidden dirs, Windows paths, tilde-expanded paths, URL hosts, aider/cursor path segments, plus prose-scrubbing baselines and mixed path/prose cases. Wired into `npm test`.
+
+### Not changed
+
+- **The FRAMEWORK_PATTERNS list itself** — same identifiers, same order, same `\b` boundaries. Only the replacement strategy changed.
+- **System prompt scrubbing semantics** — `CC_SYSTEM_PROMPT` merge, billing header, tool request fingerprint: all unchanged.
+
+### Credit
+
+[@tetsuco](https://github.com/tetsuco) — precise reproducer with the before/after path, OS, node, and dario version. Took under five minutes from issue read to root cause. Thanks for the clean report.
+
+## [3.9.2] - 2026-04-14
+
+Docs-only: tighten three `dario help` flag entries for consistency.
+
+### Changed
+
+- **`src/cli.ts` help text** — `--preserve-tools`, `--hybrid-tools`, and `--host=ADDRESS` rewritten to matching two-line entries. Removes shell-meaningless `#33` reference and "CC fingerprint" jargon from `--hybrid-tools`; expands `--preserve-tools` into a sibling shape so the subscription-routing trade-off is visible in the legend; trims the `--host` block from 5 lines to 2, deferring the `DARIO_API_KEY` LAN-binding warning to README where it's already documented in full.
+
+No behavior change. No code paths touched outside the `help()` string.
+
+## [3.9.1] - 2026-04-14
+
+Windows keychain credential detection. Finishes the Windows arm of the v3.7.0 keychain work ([#30](https://github.com/askalf/dario/pull/30) by [@iNicholasBE](https://github.com/iNicholasBE)) that was explicitly stubbed out. Tracked as item 3 of the v3.8.0+ roadmap.
+
+### Added
+
+- **Windows Credential Manager support in `loadKeychainCredentials`** (`src/oauth.ts`). Modern Claude Code on Windows (via Node keytar) stores OAuth tokens as Generic credentials in Credential Manager with target prefix `Claude Code-credentials`. Dario's `loadCredentials()` now enumerates matching entries on Windows via PowerShell + Win32 `CredEnumerateW`, decodes the UTF-16LE credential blob, and returns the first entry that parses as a valid `{claudeAiOauth: {accessToken, refreshToken}}` shape. Runs under `-NoProfile -NonInteractive -ExecutionPolicy Bypass` with a 5s timeout and `windowsHide: true` so no console flashes.
+
+  Same pattern as the macOS and Linux paths that shipped in v3.7.0: silent fall-through on any failure, so the existing file-based checks (`~/.dario/credentials.json`, `~/.claude/.credentials.json`) still run as the next fallback. Pre-v3.9.1 Windows users were hitting those file fallbacks exclusively — no regression risk for anyone whose CC on Windows writes to disk rather than to the credential manager.
+
+- **Windows keychain branch in `loadCredentials()` probe order.** Unchanged: keychain → dario file → CC file → OAuth flow. The Windows keychain path slots into the existing keychain branch; the surrounding order is untouched.
+
+### Not changed
+
+- **macOS and Linux keychain paths** — identical to v3.7.0/v3.8.x behavior. No edits to the `security find-generic-password` or `secret-tool lookup` branches.
+- **File-based credential loading** — `~/.dario/credentials.json` and `~/.claude/.credentials.json` probes run in the same order, with the same semantics.
+- **OAuth refresh flow, cache TTL, refresh cooldown, mutex** — all unchanged.
+- **All tests pass unchanged**: `test/issue-29-tool-translation.mjs` 28/28 ✅, `test/hybrid-tools.mjs` 24/24 ✅, `test/analytics-recording.mjs` 38/38 ✅, `test/failover-429.mjs` 19/19 ✅.
+
+### Testing notes
+
+Verified locally on Windows 11 Pro:
+
+1. **Build clean** — TypeScript compiles without errors.
+2. **PowerShell script standalone** — running the embedded Win32 `CredEnumerate` script against `Claude Code-credentials*` filter on a machine without a CC keychain entry returns `ERROR_NOT_FOUND` (1168), which the PS script swallows and exits with no stdout — exactly the "fall through" behavior the JS caller expects.
+3. **`loadCredentials()` smoke test** — on a machine where CC was previously installed but has now been uninstalled, the Windows keychain probe returns `null` and the file-based fallback finds `~/.claude/.credentials.json` as expected.
+
+**Not yet verified against a live CC-keychain-backed Windows install.** If you run CC on Windows and your OAuth tokens are stored in Credential Manager (not in a file), please upgrade to v3.9.1 and report whether `dario login`'s keychain probe picks up your existing session. File an issue if it doesn't — the enumeration filter or UTF-16 decode may need tweaking for edge cases we haven't seen.
+
+### Credit
+
+[@iNicholasBE](https://github.com/iNicholasBE) — the v3.7.0 macOS + Linux keychain work established the code path and the fall-through semantics; v3.9.1 just fills in the Windows slot against the same contract. Thanks also to the broader CC ecosystem for documenting the keytar → Credential Manager storage convention that made this implementation straightforward.
+
+## [3.9.0] - 2026-04-14
+
+**Hybrid tool mode** — resolves [#33](https://github.com/askalf/dario/issues/33), the roadmap item promised to [@boeingchoco](https://github.com/boeingchoco) in the v3.8.1 thread. Keep the CC request fingerprint AND let custom-schema clients see their declared non-CC fields on tool_use responses.
+
+### Background
+
+After the reverse-direction tool parameter translation fix in v3.7.0/v3.7.1, [@boeingchoco](https://github.com/boeingchoco) was still seeing `sessionId is required for this action.` from OpenClaw's validator on the Claude backend. v3.8.1 surfaced `--preserve-tools` as the escape hatch but made the trade-off explicit: the flag preserves the client's schema at the cost of the CC request fingerprint, which is what routes Max/Pro subscription billing. Users with custom-schema workloads who also wanted subscription pricing had no path. Hybrid mode fills it.
+
+The key observation: the "missing" fields are usually **request context** — `sessionId`, `requestId`, `channelId`, `userId`, `timestamp` — values dario already has from the incoming request, not values that need the model's reasoning. So dario can keep the forward path untouched (CC fingerprint preserved, Bash/Read/Grep/Glob/WebSearch/WebFetch sent upstream) and inject context values on the reverse path after `translateBack`. Both constraints satisfied.
+
+### Added
+
+- **`--hybrid-tools` flag** (alias `--context-inject`) in `src/cli.ts`. Mutually exclusive with `--preserve-tools` — the CLI rejects both with a clear error. Threaded through `ProxyOptions.hybridTools` to `startProxy`.
+
+- **`RequestContext` type** in `src/cc-template.ts`. Fields: `sessionId`, `requestId`, `channelId`, `userId`, `timestamp` (ISO 8601). Built once per request in `src/proxy.ts` from `x-session-id` / `x-request-id` / `x-channel-id` / `x-user-id` headers, with fallbacks to the proxy's internal `SESSION_ID` and a generated `randomUUID()`.
+
+- **`CONTEXT_FIELD_SOURCES` map** — a case-insensitive lookup from client-declared field name to `RequestContext` key. Initial set covers snake_case and camelCase variants of `sessionId`, `requestId`, `channelId`, `userId`, `timestamp`, `created_at`, `createdAt`.
+
+- **`injectContextFields(input, clientFields, ctx)`** — the hybrid-mode injection function. Walks each client-declared field, skips any already populated by `translateBack`, looks up the field in `CONTEXT_FIELD_SOURCES`, and fills from `ctx` when matched. No-op when `clientFields` is unset (default mode) or `ctx` is undefined.
+
+- **`ToolMapping.clientFields`** — optional array of top-level field names the client's tool schema declared. Populated in `buildCCRequest` only when `opts.hybridTools` is true; each matched mapping gets a shallow clone so the shared `TOOL_MAP` entries aren't mutated across requests.
+
+- **`test/hybrid-tools.mjs`** — 24 assertions across 6 test cases: default-mode (no injection baseline), hybrid-mode basic injection, snake_case variant, no-ctx no-op, translateBack fields not clobbered, streaming + hybrid end-to-end. All green.
+
+### Changed
+
+- **`reverseMapResponse(body, toolMap, ctx?)`** — now takes an optional `RequestContext`. Passes it into `rewriteToolUseBlock` so hybrid-mode injection runs after `translateBack`. Backward compatible: pre-3.9.0 call sites that didn't pass `ctx` still work as pure reverse-translation.
+
+- **`createStreamingReverseMapper(toolMap, ctx?)`** — same signature extension. The injection point is after the `content_block_stop` path parses the buffered `partial_json` and applies `translateBack`. The `anyNeedsTranslation` fast-path check now also considers `clientFields` so hybrid-mode mappings always take the buffering path (required — injection has to run at end-of-block, not per-chunk).
+
+- **`src/proxy.ts`** — extracts `reqCtx: RequestContext | undefined` once per request (only when `opts.hybridTools` is set). Threads through to both `reverseMapResponse` and `createStreamingReverseMapper`. `buildCCRequest` call updated to pass `hybridTools: opts.hybridTools ?? false`.
+
+- **`src/cc-template.ts` — `buildCCRequest` two-pass tool map construction**. First pass now conditionally clones the shared `TOOL_MAP` entry and attaches `clientFields` from the client's `input_schema.properties` when hybrid mode is active. Zero allocation in default mode.
+
+- **README.md** — new `### Hybrid tool mode` subsection with when-to-use table, how-it-works explanation, and limitations spelled out. The `### Custom tool schemas` subsection links forward to it as the recommended compromise for users who want subscription billing on custom-schema workloads.
+
+- **`npm test`** — adds `test/hybrid-tools.mjs` to the default test runner. Full suite now at 109 assertions across four files (issue-29: 28, hybrid-tools: 24, analytics-recording: 38, failover-429: 19).
+
+### Not changed
+
+- **Default mode behavior is unchanged.** Clients that don't pass `--hybrid-tools` get the exact same forward/reverse path they did on v3.8.1. Zero risk of regression for existing setups.
+- **`--preserve-tools` is unchanged.** Still the right answer for clients whose custom fields need the model's reasoning (not just request context).
+- **Tool `TOOL_MAP` entries are unchanged.** Same forward/back translations as v3.7.1.
+- **Streaming tool_use semantics for non-hybrid clients are unchanged.** The buffering path is the same; only mappings with `clientFields` set take the new injection branch.
+
+### Scope limitations (tracked in #33 for follow-up)
+
+- **Top-level fields only.** Nested object injection (`meta: {sessionId: ...}`) is not supported in v1.
+- **Fixed field list.** Arbitrary custom field names (e.g. internal `tenant_id`) are not auto-mapped. File an issue if you need the `CONTEXT_FIELD_SOURCES` map extended.
+- **No type coercion.** Injected values are always strings (from headers or ISO timestamps). Clients requiring typed values should use `--preserve-tools`.
+
+### Credit
+
+[@boeingchoco](https://github.com/boeingchoco) — fourth consecutive release with contribution credit. The original #29 report, the v3.7.1 SSE regression catch, the v3.8.1 provider-comparison diagnostic, and now the motivating case for this entire hybrid-mode design. Contributors table in the README updated to reflect the scope of contribution across all four releases.
+
+```bash
+npm install -g @askalf/dario@3.9.0
+```
+
+## [3.8.1] - 2026-04-14
+
+Documentation release. No code change. Surfaces [`--preserve-tools`](README.md#custom-tool-schemas) as the first-class answer for clients whose tool schemas carry fields CC's schema doesn't — credit to [@boeingchoco](https://github.com/boeingchoco) for the diagnostic work on [#29](https://github.com/askalf/dario/issues/29) that surfaced the discoverability gap.
+
+### Background
+
+[#29](https://github.com/askalf/dario/issues/29) originally surfaced as a reverse-direction tool parameter translation bug, fixed in v3.7.0 and v3.7.1. After upgrading to v3.7.1, [@boeingchoco](https://github.com/boeingchoco) reported that OpenClaw still failed with `sessionId is required for this action.` on the Claude backend — but the same OpenClaw install worked fine against `openai-codex/gpt5.4` and `github-copilot/claude-sonnet-4.6` through dario's OpenAI-compat backend. Same channel, same tools, same validator.
+
+That provider-comparison evidence was the whole key: the `sessionId` failure isn't a tool-translation bug, it's the fundamental design of the CC-template path. `buildCCRequest` substitutes the client's tool schema with CC's `Bash/Read/Grep/Glob/WebSearch/WebFetch` definitions so the outgoing request looks like a real CC call on the wire (the fingerprint that lets subscription billing match the request to a Max/Pro plan). The side effect: fields the client's schema declares but CC's doesn't — `sessionId`, channel-bound context tokens, custom request ids — never reach the model, because the model never sees them in the schema it's asked to populate. The reverse mapper rebuilds the tool call without those fields, and a strict client validator rejects.
+
+`--preserve-tools` has existed since v3.6.0 as the escape hatch: skip the CC tool remap entirely, pass the client's schema through to the model unchanged, accept that the CC fingerprint is gone and the request may bill as API usage rather than subscription usage. The flag was documented as one line in the proxy-flag table — not nearly enough to be findable by someone hitting exactly the problem it solves.
+
+### Changed
+
+- **README.md — `--preserve-tools` flag entry rewritten** with the required-for-custom-schemas hint and a link to the new subsection below. A user who hits `sessionId is required` now has a discoverable path from the proxy-flag table directly to the explanation.
+
+- **README.md — new "Custom tool schemas" subsection** (between "Streaming, tool use, OpenAI-SSE" and "Library mode") explaining:
+  - What the default CC tool substitution does and why it exists (the subscription fingerprint)
+  - What fails when your client's tools have fields CC's schema doesn't
+  - The symptom — tool calls stripped down, validator rejects, *only* on dario's Claude backend
+  - The fix — `dario proxy --preserve-tools`
+  - The trade-off — loss of the CC fingerprint, subscription billing may fall back to API pricing on that endpoint
+  - The openai-compat backend is unaffected (it forwards tool schemas byte-for-byte)
+  - The hybrid mode that keeps the fingerprint *and* passes unmapped client fields is on the roadmap
+
+### Not changed
+
+- `src/cc-template.ts`, `src/proxy.ts`, `src/openai-backend.ts` — no behavior change anywhere in the request path. This release is README-only.
+- `--preserve-tools` itself — same flag, same semantics, same code path since v3.6.0. Only its documentation changed.
+- All test suites pass unchanged. `test/issue-29-tool-translation.mjs` — 28/28 ✅.
+
+### Credit
+
+[@boeingchoco](https://github.com/boeingchoco) now cited in three consecutive releases: the original [#29](https://github.com/askalf/dario/issues/29) report (v3.7.0), the v3.7.1 regression catch, and the provider-comparison diagnostic that drove this docs release. The kind of depth-of-reporting any project maintainer would be lucky to see once.
+
+## [3.8.0] - 2026-04-14
+
+Two features that have been in the backlog since v3.5.0: real analytics data in pool mode, and inside-request 429 failover.
+
+### Added
+
+- **Analytics recording wired into all response paths** (`src/proxy.ts`). The `Analytics` class and `/analytics` endpoint shipped in v3.5.0 but `analytics.record()` was never called — the endpoint returned structural placeholders with zero data. v3.8.0 wires `record()` into every response path:
+  - **Non-streaming**: parses usage from the buffered response body using `Analytics.parseUsage()` (already existed) and records after `res.end()`.
+  - **Streaming**: accumulates `input_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens` from the `message_start` SSE event and `output_tokens` from `message_delta` in a parallel analytics decode loop (separate `TextDecoder`; does not touch the bytes written to the client). Records after `res.end()`.
+  - **429 / error paths**: records with zero token counts so failure rates are visible in `/analytics`.
+  - **OpenAI-compat path**: records with `isOpenAI: true` using the token counts extracted from the Anthropic response (the compat backend translates back to Anthropic format before returning).
+  - Analytics are still only active in pool mode (`accountsList.length >= 2`) to match the existing guard — single-account mode still returns the `{mode: "single-account"}` placeholder.
+
+- **Inside-request 429 failover for pool mode** (`src/proxy.ts`, `src/pool.ts`). Pool mode previously only failed over *between* requests: if account A 429'd, the *next* request routed to account B, but the *current* request returned a 429 to the client. v3.8.0 adds a `dispatchLoop: while (true)` around the upstream fetch. On a 429, the loop checks `pool.selectExcluding(triedAliases)` before surfacing the error. If another account is available, it swaps the `Authorization` and `x-claude-code-session-id` headers and retries with the buffered request body (already held in memory since v3.5.0). The loop is bounded to `pool.size` iterations to guarantee termination. `pool.selectExcluding` extended from `(alias: string)` to `(excluded: Set<string>)` to support multi-account exclusion cleanly.
+
+### Changed
+
+- **`AccountPool.selectExcluding(excluded: Set<string>)`** (`src/pool.ts`). Signature changed from single-alias string to a Set of aliases. The method is internal (only called from `proxy.ts`). Existing callers (only the failover loop) updated accordingly.
+
+### Test results
+
+- `test/issue-29-tool-translation.mjs` — 28/28 ✅ (unchanged)
+- `test/analytics-recording.mjs` — 38/38 ✅ (new: unit tests for `Analytics.parseUsage()`, `record()`, `summary()`, error rates, per-account/per-model breakdown, streaming 429 records)
+- `test/failover-429.mjs` — 19/19 ✅ (new: unit tests for `selectExcluding(Set)`, multi-alias exclusion, rejected-account skipping, full failover simulation)
+
+Live e2e tests (`npm run e2e`, `npm run compat`) deferred until pool-mode account is available for testing.
+
+## [3.7.2] - 2026-04-14
+
+Security hardening release. Two CodeQL alerts filed against v3.7.1 — one `js/clear-text-logging` error and one `js/stack-trace-exposure` warning — both fixed with minimal-surface patches. No behavior change for any working path.
+
+### Fixed
+
+- **`js/clear-text-logging` (src/cli.ts:293).** `dario backend list` displayed API keys as `${first_3}...${last_4}` as a human-readable identifier. CodeQL's taint tracker (correctly, by policy) treats partial disclosure as disclosure — and it's right: a 7-character window from a 48-character key is more than enough to narrow a brute-force attempt against a known prefix family, and there's no defensible reason to show any substring of an API key in the first place. Fix: the list command now always prints `***` for the redacted column. Backend name and baseUrl are more than enough to tell backends apart.
+
+- **`js/stack-trace-exposure` (src/openai-backend.ts:179).** The OpenAI-compat backend's upstream-error path constructed a 502 response body that included `err instanceof Error ? err.message : String(err)`. `Error.message` can leak internal paths, module names, and stack fragments (DNS errors in particular include the upstream hostname and the resolver's internal state). Fix: the error detail now logs to `console.error` server-side only (gated on `verbose`), and the 502 response body returns a generic `{error, backend}` payload to the client. Operators running `dario proxy --verbose` still see the underlying cause in their logs; clients never do.
+
+### Not changed
+
+- No behavior change for the CLI `dario backend add` flow. API keys are still stored at `~/.dario/backends/<name>.json` with `0600` permissions — that path is unchanged.
+- No behavior change for successful upstream responses on the OpenAI-compat backend. The response body, headers, and streaming semantics are unchanged.
+- No behavior change for the Claude-subscription backend. Tool-use parameter translation, pool mode, template replay — all unchanged.
+
+### Test results
+
+- `test/issue-29-tool-translation.mjs` — 28/28 ✅ (unchanged, tests the Claude backend path which this release doesn't touch)
+
+## [3.7.1] - 2026-04-14
+
+Regression fix for the v3.7.0 streaming reverse mapper. Reopens and then closes [#29](https://github.com/askalf/dario/issues/29) (reported by [@boeingchoco](https://github.com/boeingchoco)).
+
+### Fixed
+
+- **Streaming reverse mapper emitted malformed SSE event groups.** v3.7.0's `createStreamingReverseMapper` handled the synthetic-delta-plus-stop emission for buffered tool_use blocks as two `data:` lines joined by a single `\n` with no blank-line separator. SSE parsers concatenate consecutive `data:` lines within one event into that event's data, so downstream clients (including the Anthropic SDK's streaming parser in `@anthropic-ai/sdk/src/core/streaming.ts`) saw one event whose data was two JSON objects joined by a newline. `JSON.parse(...)` threw `Could not parse message into JSON`, which is exactly the error [@boeingchoco](https://github.com/boeingchoco) hit after upgrading to v3.7.0 and running the same OpenClaw workload that originally surfaced #29. The v3.7.0 unit test had a false-positive validation: it split the mapper's output on `\n` and filtered for `data: ` lines, which inadvertently treated the malformed multi-line data event as two separate events (since each line on its own was valid JSON). Real SSE parsers don't do that, and the Anthropic SDK parser in particular throws the moment it hits the concatenated-JSON payload.
+- **Orphan `event:` header lines** from swallowed tool_use delta events. v3.7.0 processed SSE one line at a time, so when a `content_block_delta` was buffered for end-of-block translation, only the `data:` line was swallowed — the preceding `event: content_block_delta` header line passed through to the client as an empty event with no payload. Harmless for Anthropic SDK (which skips events without data) but wrong and confusing under stricter SSE parsers.
+
+### Changed
+
+- **`createStreamingReverseMapper` rewritten to process SSE event groups, not individual lines.** The mapper now splits its accumulated buffer on blank lines (`\n\n` — the SSE event-group separator) and processes each complete event as a unit. When a buffered `content_block_delta` is swallowed, its entire event group (header line + data line) is dropped together — no more orphan headers. When the `content_block_stop` emission needs to produce a synthetic delta followed by the stop event, it returns two complete event groups joined by `\n\n`, and the outer buffer writer appends one more `\n\n` after the final event. Every emitted event is framed correctly per SSE spec and parses cleanly in the Anthropic SDK's streaming parser.
+- **`test/issue-29-tool-translation.mjs` gained a real SSE parser** (`parseSseEvents`) that splits on blank lines and validates each event group the way a real client parser would — including concatenating multi-line `data:` within an event, which is what the v3.7.0 bug exploited. The test now asserts that every emitted event group parses as valid JSON (regression guard for this exact class of bug), that each logical event carries its own `event:` header, and that passthrough events (`message_start`, `message_stop`) still flow through unchanged. 28 assertions total, all green.
+
+### Test results
+
+- `test/issue-29-tool-translation.mjs` — 28/28 ✅ (up from 21 in v3.7.0; 7 new assertions specifically guard the SSE event-group framing)
+- `test/compat.mjs` — 10/10 ✅ (including streaming tests against a live proxy running the v3.7.1 code)
+- `test/e2e.mjs` — 12/12 ✅
+- Stealth suite — same pre-existing `five_hour` vs `seven_day` and effort-ratio failures we've documented in the [#32 discussion](https://github.com/askalf/dario/discussions/32); unrelated to this release.
+
+### Compatibility
+
+No public API changes. No behavior change for clients that were working on v3.7.0 (they were primarily non-streaming tool-use clients, which use `reverseMapResponse` rather than the streaming mapper). The streaming tool-use path is the one that was broken, and it's the one this release fixes.
+
+## [3.7.0] - 2026-04-14
+
+Two community-driven fixes. macOS keychain credential detection (PR #30 by [@iNicholasBE](https://github.com/iNicholasBE)) and reverse-direction tool parameter translation (#29, contributed by [@boeingchoco](https://github.com/boeingchoco)).
+
+### Fixed
+
+- **macOS keychain credential detection** ([#30](https://github.com/askalf/dario/pull/30) by [@iNicholasBE](https://github.com/iNicholasBE)). Modern Claude Code versions (since ~1.0.17) store OAuth tokens in the OS credential store instead of `~/.claude/.credentials.json`. Dario's `loadCredentials()` only checked file paths, so on macOS it never found existing CC credentials and always fell through to its own OAuth flow even when CC was installed and logged in. Adds `loadKeychainCredentials()` as a fallback after the file-based checks. macOS path uses `security find-generic-password -s "Claude Code-credentials" -w`. Linux path uses `secret-tool lookup service "Claude Code-credentials"` for systems with libsecret. Windows is explicitly stubbed for a follow-up. Calls use `execFile` (not shell) with a 5s timeout, validate the parsed payload has `claudeAiOauth.accessToken` shape, and fall through silently on any failure so the existing OAuth flow still runs as the final fallback.
+
+- **Reverse-direction tool parameter translation** ([#29](https://github.com/askalf/dario/issues/29), reported by [@boeingchoco](https://github.com/boeingchoco)). The forward-direction tool mapping (client tool name → CC tool name + parameter shape) had `translateArgs` callbacks per mapping that rewrote client args into CC's parameter shape before the upstream request. The reverse direction (CC tool_use response → client tool name + parameter shape) only rewrote the **name**, not the **parameter shape**, which left the client receiving tool calls in CC's parameter format against its own validator's schema. For OpenClaw and similar agent frameworks that map their native tools (`process`, `read`, `memory_get` with parameters `action`/`path`/`path`) onto CC's tools (Bash, Read, Glob with parameters `command`/`file_path`/`pattern`), the resulting mismatch caused hard validation errors that prevented any tool execution. Fixed by:
+
+  - Adding `translateBack` callbacks to every non-trivial entry in `TOOL_MAP`, each producing the *primary* client field name from the forward function's `||` chain. For example, the `process` mapping forward function `(a) => ({ command: a.action || a.cmd || '' })` gets a reverse `(a) => ({ action: a.command ?? '' })`.
+  - Rewriting `reverseMapResponse` to be JSON-aware: it now parses the upstream body, walks the `content` array, and applies each mapping's `translateBack` to every `tool_use.input` block. Unparseable bodies (errors, partial chunks) pass through unchanged.
+  - Adding `createStreamingReverseMapper` for SSE responses. Tool_use input arrives as `input_json_delta` partial_json fragments that don't form valid JSON until `content_block_stop`. The streaming mapper buffers fragments per content block, parses the assembled input on stop, applies `translateBack`, and emits a single synthetic delta with the translated input followed by the original stop event. Trade-off: clients that consume tool_use input as it streams will see it arrive at end-of-block instead of character-by-character. For tool input (typically <1KB) that's acceptable; the alternative is the validation-error class this fix exists to eliminate. Clients that need streaming tool input fidelity can use `--preserve-tools` to skip the entire forward/reverse mapping layer.
+
+### Added
+
+- **`test/issue-29-tool-translation.mjs`** — self-contained regression test for the #29 fix. Builds a tool map from a fabricated OpenClaw-style client request, simulates upstream Anthropic responses (both non-streaming and streaming, including a byte-by-byte split-mid-line stress case), and asserts the translated output contains the client's parameter shape rather than CC's. Runs in-process without OAuth or a live proxy, so it executes on a fresh checkout. 21/21 assertions green at v3.7.0.
+- **`npm test`** wired to run the regression test by default. The pre-existing `npm run e2e` and `npm run compat` continue to require a live proxy and OAuth credentials.
+- **`ToolMapping` interface exported** from `cc-template.ts` for type narrowing in `proxy.ts` and for downstream consumers that want to inspect the active tool map.
+
+### Test results
+
+- `test/issue-29-tool-translation.mjs` — 21/21 ✅ (new)
+- `test/compat.mjs` — 10/10 ✅ (covers tool use, streaming, OpenAI compat — the surface this release touches)
+- `test/e2e.mjs` — 12/12 ✅
+- `test/stealth-test.mjs` — 6/11 — the 5 failures are pre-existing test infrastructure issues unrelated to this release (subscription-window state in the test account has rolled from `five_hour` to `seven_day` after sustained development traffic, and the high-vs-medium effort ratio test is a known noisy heuristic). Same pattern as v3.4.5 and v3.5.0 release tests; not a regression.
+
+### Compatibility
+
+No public API removed. `ToolMapping` is now exported but was previously the same shape internally. Single-account dario users see no behavior change. Pool-mode users see no behavior change. OpenClaw / Hermes / Aider / any client that was hitting the parameter mismatch should see immediate fix on upgrade with no config changes required.
+
+## [3.6.1] - 2026-04-13
+
+Docs-only release to ship the full positioning rewrite that should have landed with v3.6.0. No code changes; functionally identical to v3.6.0.
+
+### Changed
+
+- **Full README rewrite around the multi-provider story.** Dario's identity is no longer "Claude subscription proxy" — it is "a local LLM router, one endpoint on your machine, every provider behind it." The Claude subscription path is now framed as one of several backends (and the most thoroughly developed one), not as dario's primary purpose. The OpenAI-compat backend shipped in v3.6.0 is now above the fold, not tucked into a section near the end. The "Who this is for" block, first use case, "Why switch" self-qualifier, and quickstart all lead with the multi-provider reality instead of the Claude-only legacy framing.
+- **`package.json` description** updated from "Use your Claude subscription as an API. No API key needed. Local proxy for Claude Max/Pro subscriptions." to "A local LLM router. One endpoint, every provider — Claude subscriptions, OpenAI, OpenRouter, Groq, local LiteLLM, any OpenAI-compat endpoint — your tools don't need to change." This change is visible on the npm package page.
+- **`package.json` keywords** reordered and expanded: `llm`, `llm-router`, `multi-provider`, `openai-compat`, `openrouter`, `groq`, `litellm`, `ollama` added alongside the existing Claude-centric keywords. Search discoverability was previously anchored on Claude-only terms.
+- **README contributor row, FAQ entries, trust table, and all internal links preserved.** The structural spine (Nathan-widjaja's promise → who → first use → why switch → proof) from #21 is kept intact; content inside each section was rewritten around the new backends-first framing.
+
+### Why ship this as a separate release
+
+The v3.6.0 code shipped multi-provider routing but the README still positioned dario as a Claude proxy with multi-provider as a feature. That mismatch meant anyone landing on npm or GitHub would read the wrong story about what dario is, even though the binary they'd install was correct. A docs-only release is the right tool for fixing that — the running bits are unchanged, npm's package page updates, and anyone installing v3.6.1 gets the same runtime as v3.6.0 with the right narrative.
+
+No behavior change, no migration required, nothing deprecated.
+
+## [3.6.0] - 2026-04-13
+
+Multi-provider routing. Dario stops being Claude-only.
+
+### Added
+- **Secondary OpenAI-compat backend.** `dario backend add openai --key=sk-...` configures an OpenAI-compat endpoint that dario routes GPT-family model requests to. Works with any OpenAI-compatible provider — OpenAI, OpenRouter, Groq, a local LiteLLM, Ollama's OpenAI-compat mode — via `--base-url=https://your-provider/v1`. Credentials stored at `~/.dario/backends/<name>.json` with mode 0600. Multiple backends can be listed and removed independently.
+- **`dario backend` CLI.** `dario backend list`, `dario backend add <name> --key=<api-key> [--base-url=<url>]`, `dario backend remove <name>`.
+- **Routing branch in the proxy.** When an OpenAI-compat backend is configured and a request arrives at `/v1/chat/completions` with a GPT-family model name (`gpt-*`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*`, `text-davinci-*`, `text-embedding-*`), dario forwards the request as-is to the backend's `baseUrl`, swaps the Authorization header to the configured API key, and streams the response back. No template replay, no identity injection, no Claude-side processing — the client is already speaking OpenAI format, the backend is OpenAI-compat, dario is just the local router.
+- **Programmatic API:** `listBackends`, `saveBackend`, `removeBackend`, `getOpenAIBackend`, `isOpenAIModel`, and `BackendCredentials` exported from `@askalf/dario` for library users.
+
+### Why
+Per-request template replay, framework scrubbing, and multi-account pool routing all reduce dario's exposure to Anthropic's classifier, but they keep dario in a 1:1 game with one vendor — every move Anthropic makes requires a counter-move in dario. Adding a second provider changes the game board: when dario speaks to Claude *and* OpenAI (and any OpenAI-compat endpoint — OpenRouter, Groq, self-hosted LiteLLM, local Ollama), the value proposition stops being "beat the Claude classifier" and starts being "the local router between any LLM and any tool on your machine." If Anthropic tightens a knob, traffic for affected workloads shifts to another backend. If they ship their own subscription-via-API, the Claude backend simplifies and keeps working. Dario wins either way.
+
+This release is the smallest clean slice of that architecture: one secondary backend, one routing branch, zero change to the existing Claude path.
+
+### Not in this release
+- **Cross-format translation.** Requests at `/v1/messages` (Anthropic format) with GPT-family model names fall through to the existing Claude-side handling (where they map to Claude equivalents). Anthropic→OpenAI request translation, including tool_use format conversion, lands in a follow-up.
+- **Multiple simultaneous openai-compat backends.** Only the first configured backend is active for routing. Per-model backend selection (`gpt-*` → OpenAI, `llama-*` → Groq, `mixtral-*` → OpenRouter) is a follow-up release.
+- **Fallback rules.** "If Claude 429s, use Gemini" is a v3.7.0+ goal. v3.6.0 ships the routing plumbing; fallback logic ships on top of it.
+
+No behavior change for Claude-only users. Pool mode and everything else from v3.5.0 keeps working unchanged. Secondary backends are additive.
+
+## [3.5.0] - 2026-04-13
+
+Multi-account pool mode — the first new user-visible capability since template replay.
+
+### Added
+- **Multi-account pool mode.** Dario can now manage multiple OAuth accounts and route requests by per-account headroom. Pool mode activates automatically when `~/.dario/accounts/` contains 2+ entries. Single-account dario (the default) is unchanged and keeps using `~/.dario/credentials.json`.
+- **`dario accounts` CLI.** New subcommand group: `dario accounts list`, `dario accounts add <alias>`, `dario accounts remove <alias>`. Each account runs its own PKCE OAuth flow — using the same auto-detected CC OAuth config the single-account path uses, not a hardcoded client_id — and lives in `~/.dario/accounts/<alias>.json`. Accounts refresh on independent 15-minute background ticks.
+- **`GET /accounts` endpoint.** Read-only JSON snapshot of the pool: per-account utilization (5h and 7d), billing claim, status, request count, token TTL. Returns `{mode: "single-account", accounts: 0}` when pool mode is not active.
+- **`GET /analytics` endpoint (pool mode).** Per-account and per-model stats, utilization trends in 5-minute buckets, burn-rate estimates, window-exhaustion predictions. Infrastructure scaffolded in this release; request-recording hook lands in v3.5.1 along with the full failover work.
+- **Programmatic pool API.** `AccountPool`, `parseRateLimits`, `loadAllAccounts`, `addAccountViaOAuth`, `refreshAccountToken`, `Analytics`, and related types exported from `@askalf/dario` for library users.
+
+### Changed
+- **Pool-mode request dispatch.** When pool mode is active, every incoming request picks the account with the highest headroom (`1 - max(util5h, util7d)`) and uses that account's access token and device identity for the upstream call. After the response returns, the account's rate-limit snapshot is updated from the response headers so the next selection reflects fresh utilization. A 429 from the upstream marks the account `rejected` and routes subsequent requests elsewhere until reset.
+- **Session ID handling.** Pool mode uses a per-account stable session ID (one per account per proxy lifetime). Single-account mode continues to rotate the session ID per request exactly as before. No behavior change for single-account users.
+
+### Ported from mux
+Three modules from `askalf/mux` lifted into dario with minimal adaptation:
+
+- `src/pool.ts` — headroom-aware account selection, failover target selection (`selectExcluding`), request queueing when all accounts are exhausted, drain-on-headroom loop. ~270 lines.
+- `src/accounts.ts` — per-account credential storage, independent OAuth refresh lifecycle, PKCE flow using dario's auto-detected CC OAuth config (not the hardcoded dev client_id mux was shipping). ~270 lines.
+- `src/analytics.ts` — rolling request history, per-account and per-model stats, burn-rate prediction, exhaustion estimates. ~320 lines.
+
+### Known scope for v3.5.1 (not in this release)
+- **Request-path 429 failover.** v3.5.0 wires pool mode for headroom-aware selection *across* requests and marks accounts rejected when they 429, so the *next* request routes to a different account. It does not yet retry a single in-flight request against the next account when that request 429s — if an account 429s mid-request, that request returns the enriched 429 to the client, and subsequent requests go to a different account. Full inside-request failover ships in v3.5.1.
+- **Analytics recording.** The `/analytics` endpoint is live and the `Analytics` class is in place; hooking `analytics.record()` into the proxy response path ships alongside the failover work in v3.5.1.
+
+No behavior change for single-account dario. Pool mode is opt-in by adding a second account.
+
+## [3.4.6] - 2026-04-13
+
+### Changed
+- **Full README rewrite** — Positioning pass using [@nathan-widjaja](https://github.com/nathan-widjaja)'s structure from #21 as the baseline. Top-of-page now leads with a one-line promise, a who-this-is-for block, a first use case, and a self-qualifier "Why switch" section before any mechanics. Dario is explicitly framed as "the local bridge for your Claude subscription — standalone today, also the local edge of [askalf](https://askalf.org) when your workload outgrows a single subscription." Standalone mode remains the first-class default; askalf linkage is the progression rather than the requirement.
+- **Removed** the AI-reviews social-proof block and the vs-competitors collapsible table. Both were scrolling past the first-screen buyer question rather than helping it land.
+- **Condensed** the per-tool usage sections (Hermes/OpenClaw/Cursor/Continue/Aider) into a single OpenAI-compatible block with a note that anything accepting an OpenAI base URL works. The Python, TypeScript, curl, and streaming examples stay.
+- **Surfaced** the #23 session-level-classifier FAQ entry (added in v3.4.5) alongside the existing rate-limit entry so anyone hitting the same wall finds the answer without scrolling past the full mechanics section.
+- **Added** a "From standalone to askalf" section that explicitly names the capabilities linkage would add (multi-account pooling, session shaping, browser/desktop control, scheduling, persistent memory) and reserves `dario link` as the command that will pair a local instance with an askalf account once the bridge endpoint is live.
+
+No behavior or code changes — this release exists to update the npm-published README to match the repo. Functionally identical to 3.4.5.
+
+## [3.4.5] - 2026-04-13
+
+### Fixed
+- **Framework identifiers are now scrubbed from message content, not just the system prompt** (follow-up to #23) — `FRAMEWORK_PATTERNS` was previously only applied to `systemText` in `buildCCRequest`, so a framework name like `OpenClaw` or an OC-specific tool-prefix like `sessions_get` inside a user message or `tool_result` block passed through to upstream unchanged. The scrub now covers string message content, `text` blocks, and `tool_result` content in both string and array forms. Logic factored into an exported `scrubFrameworkIdentifiers()` helper.
+- **Broadened fingerprint pattern list** — Added `roo-cline`, `big-agi`, `librechat`, `typingmind`, `claude-bridge`, and the `sessions_*` tool-name prefix (flagged as an OC fingerprint during the #23 diagnostic work). Compound patterns run before single-word ones so compound matches can't be partially eaten by the more general rules.
+- **Additional orchestration tag names** in the proxy-level sanitizer: `agent_persona`, `agent_context`, `tool_context`, `persona`, `tool_call`. These are inline tags some agent frameworks inject into message content that would otherwise survive to upstream.
+
+### Changed
+- **README positioning pass** — Dario is now framed as the *per-request layer* throughout, with session- and account-level concerns routed explicitly to askalf. The "Detection resistance" row is scoped to the per-request level. The askalf section was rewritten from defensive ceiling language to active scope definition — dario and askalf solve different layers, and solving session-level concerns at the per-request layer is a category error. New FAQ entry directly answers "my multi-agent workload got reclassified to overage, why?" by naming the classifier mechanism, crediting the #23 diagnostic work, and routing session-layer shaping to askalf.
+
+## [3.4.4] - 2026-04-13
+
+### Fixed
+- **OAuth scope list was incomplete — `dario login` could fail on authorize with the v3.4.3 scanner.** The v3.4.3 OAuth scanner returned 4 scopes (`user:profile user:inference user:sessions:claude_code user:mcp_servers`) because its scope-detection regex anchored on the string `"user:profile "` and happened to match an error-message string literal inside the CC binary (used by `claude setup-token` help output) rather than the real scope array. Real CC's normal `claude login` flow uses the `n36` scope union, which is 6 scopes including `org:create_api_key` and `user:file_upload`. The prod `client_id` enforces the correct scope set, so the short list from v3.4.3 was rejected by the authorize endpoint for any user who upgraded and tried to log in fresh. Removed scope auto-detection from the scanner entirely (the real scope array is stored as a constant-reference array in minified JS, where the first two elements are variable references rather than literal strings, so no regex can reliably extract it). Scope list is now hardcoded to the full 6-element `n36` union in the scanner's fallback. Scopes rarely change across CC releases; hardcoding is more reliable than scanning.
+- **Cache file renamed to `~/.dario/cc-oauth-cache-v3.json`** — invalidates v3.4.3 caches that were populated with the wrong 4-scope list. On first run after upgrade, dario re-scans and writes the correct value. No manual cleanup required.
+
+### Added
+- **Client-disconnect abort on upstream fetches** — When a client disconnects mid-response (browser tab closed, OpenAI-compat tool killed, network blip), dario now aborts the upstream fetch to Anthropic so quota isn't wasted on responses nobody will read. Previously dario would keep streaming from Anthropic until the 5-minute upstream timeout fired. Single `AbortController` per request covers both the timeout and the client-disconnect abort. Catch block differentiates timeout/client-close/other so each gets the right response (504 / silent / 502). Pattern ported from openclaw-claude-bridge's subprocess lifecycle handling, adapted for dario's HTTP-proxy shape.
+
+### Changed
+- **README and OAuth E2E test updated to match the v3.4.3 scanner semantics** — earlier versions of this test still asserted against the deprecated cache path and inverted the client_id assertions. All 15 checks now pass against a real CC 2.1.104 binary.
+- **CI actions bumped** — `actions/checkout@v4` → `@v5` and `actions/setup-node@v4` → `@v5` across `ci.yml`, `publish.yml`, `codeql.yml`. Clears a Node 20 deprecation warning we saw during the v3.4.3 publish run. Previously on v4 which still ran on Node 20.
+- **3.4.1 CHANGELOG entry tightened** — the `--cli` removal description was over-explained in a prior docs commit; now reads as a tight summary of why our specific implementation was removed.
+
+## [3.4.3] - 2026-04-13
+
+### Added
+- **`--host` flag / `DARIO_HOST` env var** — Override the bind address. Default stays `127.0.0.1` so the out-of-the-box behavior is unchanged. Set to `0.0.0.0` to accept LAN connections, or to a specific IP (e.g. a Tailscale interface) to bind selectively. When binding to anything non-loopback, dario prints a warning at startup reminding you to set `DARIO_API_KEY` — otherwise any host that can reach the port can proxy requests through your OAuth subscription. (#20)
+- **`DARIO_CORS_ORIGIN` env var** — Override the browser-CORS `Access-Control-Allow-Origin` value. Defaults to `http://localhost:${port}` so existing setups behave the same. Useful for browser-based clients (open-webui, librechat, etc.) connecting to dario over a Tailscale mesh, which need the CORS origin to match the host they're actually hitting.
+
+### Fixed
+- **Critical: OAuth login failures on v3.3.0-v3.4.2** — `dario login` and `dario refresh` have been failing with `Invalid client id provided` / `Client with id [uuid] not found` for a growing number of users over the last 24-48 hours. Root cause: the `cc-oauth-detect.ts` scanner introduced in v3.4.0 anchored on `OAUTH_FILE_SUFFIX:"-local-oauth"` to find the OAuth config inside the installed CC binary, and extracted `CLIENT_ID: 22422756-60c9-4084-8eb7-27705fd5cf9a`. That block turns out to be **dead code** in shipped CC builds — it's the config CC uses when targeting Anthropic's internal localhost dev stack (`http://localhost:8000`/`4000`/`3000` as API hosts), selected only when an internal environment switch returns `"local"`. Shipped CC binaries hardcode that switch to `"prod"` and use the `nh$` config instead, which carries `CLIENT_ID: 9d1c250a-e61b-44d9-88ed-5944d1962f5e`. The scanner was extracting a client_id that CC itself never uses at runtime. Anthropic's authorize endpoint had previously been lenient enough to accept the dev client_id in addition to the prod one; recent tightening on their side started rejecting it, which is why this surfaced as a cliff failure. Credit to @belangertrading who identified the correct client_id in #12 — the earlier rebuttal was mistaken on both directions (switching to `9d1c250a-` does *not* cause `invalid_redirect_uri`; the prod client is registered with `http://localhost:${port}/callback` exactly as dario sends).
+- **Scanner re-anchored on `BASE_API_URL:"https://api.anthropic.com"`** — This literal only appears inside the prod config block, so the scanner now reliably lands inside the right object regardless of how the minifier reorders fields across CC releases. Defensive check rejects a scan result if it matches the known-dead dev UUID.
+- **Cache file renamed to `~/.dario/cc-oauth-cache-v2.json`** — Invalidates v3.4.0-v3.4.2 caches that pinned the wrong client_id. On first run after upgrade, dario re-scans the installed CC binary and writes the correct value. No manual cache clearing required.
+- **Fallback values updated to CC 2.1.104 prod config** — Clients running dario without CC installed locally now fall back to the same values real CC uses, not the dead-code dev values.
+
+### Related
+- Likely also resolves #18 (Wysie), #22 (trinhnvgem, iNicholasBE) — same symptom, same root cause.
+- Partially resolves #26 — the `credentials.json` missing-`clientId` regression becomes a non-issue once the refresh path reads the correct client_id from the detector rather than expecting it in `credentials.json`.
+
+## [3.4.2] - 2026-04-13
+
+### Added
+- **`NotebookRead` tool definition** — Pairs with the existing `NotebookEdit` in the CC template. Added to both `tools` and `tool_names`.
+- **Additional client tool aliases** in `TOOL_MAP` — `browser`, `message`, `todo_read`, `notebook_read`, `enter_plan_mode`/`exit_plan_mode`, `enter_worktree`/`exit_worktree`. Each alias routes to a real CC tool that already exists in the template, so third-party agents with non-standard tool names get a clean mapping instead of falling through to the unmapped-tool distributor.
+
+### Fixed
+- **`package.json` JSON corruption** — A version-bump helper wrote the file's string representation back out with escaped `\n` instead of real newlines, breaking `npm ci` across the Node 18/20/22 CI matrix. Restored proper formatting.
+- **Template tool-list drift from the community tool-mapping PR** — The merged PR added tool definitions for names that aren't part of the real Claude Code tool surface (`Browser`, `TodoRead`, `MCPListTools`, `MCPCallTool`, `TaskCreate`, `TaskUpdate`), and only updated the `tools` array without touching the parallel `tool_names` list, leaving the template internally inconsistent. Removed the non-CC entries so every tool dario advertises to the API matches a real CC tool, and re-synced `tool_names`. Client aliases that previously pointed at the removed names now redirect to the closest real tool (`browser` → `WebFetch`, `todo_read` → `TodoWrite`, etc.).
+- **Stray framework reference in `cc-template.ts`** — Replaced the mapping-section header comment with a neutral label.
+
+## [3.4.1] - 2026-04-12
+
+### Removed
+- `--cli` / CLI backend mode — Removed. Our implementation proved unreliable in practice: no tool use support, streaming conversion artifacts, and context handling that diverged from real API behavior in multi-turn conversations. The features we added to work around those limitations turned into bug sources faster than they closed the gap. Removed in favor of direct API mode with template replay, which is dario's single supported path going forward.
+- **Dead helper functions** — `jsonToSse`, `jsonToOpenaiSse`, `sendCliResponse`, `handleViaCli`, and the CLI auto-fallback branch in the 429 handler. All only reachable through the removed `--cli` mode. ~300 lines of unreachable code.
+- **Unused imports** — `spawn`, `writeFileSync`, `unlinkSync`, `tmpdir` (all were CLI-only).
+- **Obsolete orchestration tag names** — Removed `tool_exec`, `tool_output`, `skill_content`, `skill_files`, `available_skills` from the tag stripper. These never appeared in real client requests and were carryover from an earlier draft of the sanitization pass.
+- **Internal code references in comments** — Stripped references to Claude Code's minified internal function/constant names. Those were useful as working notes during the reverse-engineering pass; nothing to do with what dario does at runtime.
+
+### Changed
+- **`proxy.ts` shrank from 1,102 → 837 lines** (~24% smaller) after dead code removal.
+- **`detectCli()` → `detectCliVersion()`** — Function now only exists to grab the installed CC version for the per-request build-tag computation. The old name implied a broader "detect CLI availability" role that no longer exists.
+- **Rate governor comment** — Rewritten to describe *what* the limit does, not *why* a specific subprocess invocation pattern motivated it.
+- **Mode line on proxy startup** — Simplified to 2 states (passthrough vs. OAuth) instead of 3.
+
+## [3.4.0] - 2026-04-12
+
+### Added
+- **Auto-detect OAuth config from CC binary** — Dario now scans the installed Claude Code binary at startup and extracts `client_id`, `authorize URL`, `token URL`, and `scopes` directly from the local-oauth config block. Eliminates the "Anthropic rotated the client_id again" class of bugs permanently — dario now stays in sync with whatever CC version the user has installed, forever. See [`src/cc-oauth-detect.ts`](src/cc-oauth-detect.ts).
+- **Detector cache** — Scanner results are cached at `~/.dario/cc-oauth-cache.json` keyed by a binary fingerprint (first 64KB sha256 + size + mtime). Cold scan ~500ms, cache hit ~5ms, re-scans only on CC upgrade.
+- **Fallback config** — If no CC binary is found or scanning fails, dario falls back to known-good v2.1.104 values so it still works on machines without CC installed.
+- **E2E test** (`test/oauth-detector.mjs`) — 12-check validation of the scanner against a real CC binary, including binary-block proof that the detected `client_id` comes from the `OAUTH_FILE_SUFFIX:"-local-oauth"` config block and not the platform-hosted block.
+
+### Fixed
+- **Long-context retry now handles HTTP 400** in addition to 429. Anthropic returns the long-context-beta error as 400 for some endpoints (`"long context beta is not yet available for this subscription"`), which was not triggering the existing retry path in v3.3.0. The retry now catches both status codes before auto-retrying without `context-1m-2025-08-07`.
+
+### Technical context
+- CC ships **two OAuth client configurations** in one binary: a `-local-oauth` flow (used by clients that run their own localhost callback, like dario) and a platform-hosted flow (used when the callback is on `platform.claude.com`). The two blocks have different `CLIENT_ID` values. Dario must use the `-local-oauth` flow; the scanner anchors on that specific config key to avoid picking up the wrong block.
+- Detection is proven against CC v2.1.104. The scanner uses stable string anchors (`OAUTH_FILE_SUFFIX:"-local-oauth"`, `CLAUDE_AI_AUTHORIZE_URL`, `TOKEN_URL`, `"user:profile "`) that are unlikely to change between CC minor versions.
+
+## [3.3.0] - 2026-04-12
+
+### Added
+- **`--preserve-tools` mode** — Opt-out of CC tool schema replacement for agent frameworks that rely on their own custom tool definitions. When set, dario keeps the client's exact tool schemas instead of mapping them onto CC's. Use this for agents with bespoke tool parameters that don't fit CC's tool shapes (e.g. deployment tools with `service`/`version` instead of `command`/`description`).
+- Corresponding CLI flag and programmatic option (`preserveTools: true`).
+
+### Context
+- Default mode (template replay) still remaps client tools to CC's canonical set for maximum detection resistance. `--preserve-tools` is for the subset of agent stacks whose tool semantics get mangled by the remap.
+
+## [3.2.7] - 2026-04-12
+
+### Fixed
+- **OAuth login for Max plan accounts (#18)** — Updated OAuth `client_id`, `authorize URL`, and `scopes` to match Claude Code v2.1.104 binary RE:
+  - `client_id`: `9d1c250a-…` → `22422756-60c9-4084-8eb7-27705fd5cf9a` (the local-oauth client — see v3.4.0 for why)
+  - `authorize URL`: `platform.claude.com/oauth/authorize` → `claude.com/cai/oauth/authorize`
+  - `scopes`: removed `org:create_api_key` (Console plan only)
+- New users trying to log in with Max plan accounts were getting OAuth errors because the URL/client/scope combination was inconsistent with what CC v2.1.104 actually uses. Existing users with valid tokens are unaffected — only the login flow was broken.
+
+## [3.2.6] - 2026-04-12
+
+### Changed
+- **Provenance-attested release** — CI pipeline hardening. No code changes.
+
+## [3.2.5] - 2026-04-12
+
+### Fixed
+- **Auto-retry without context-1m on long-context billing error** — When Anthropic returns a 429 with `"Extra usage is required for long context requests"`, dario now automatically retries without the `context-1m-2025-08-07` beta flag. Prevents silent failures on subscriptions without Extra Usage enabled. (v3.4.0 extends this retry to also handle 400 responses.)
+
+## [3.2.4] - 2026-04-12
+
+### Changed
+- **1M context is now opt-in via `DARIO_EXTENDED_CONTEXT=1`** — The `context-1m-2025-08-07` beta flag is no longer sent by default because it requires Extra Usage on the Anthropic account. Users who have enabled Extra Usage can turn it back on with the environment variable.
+
+## [3.2.3] - 2026-04-12
+
+### Changed
+- **Removed `context-1m-2025-08-07` beta from the default beta set** — It requires Extra Usage to be enabled on the Anthropic account and was causing 400 errors for Max plan users without Extra Usage turned on.
+
+## [3.2.2] - 2026-04-12
+
+### Changed
+- **Provenance-attested release** — CI pipeline hardening. No code changes.
+
+## [3.2.1] - 2026-04-12
+
+### Fixed
+- **CLI fallback masking 429 errors** — When the API returned 429 and the CLI fallback also failed (e.g. on ARM64 where `claude --print` may not work), dario returned a cryptic 502 instead of the actual rate limit details. Now returns the original 429 with enriched utilization and reset time.
+
+## [3.2.0] - 2026-04-12
+
+### Added
+- **Bun auto-relaunch** — If Bun is installed, dario automatically relaunches under Bun runtime. Bun's TLS fingerprint (BoringSSL, cipher suites, extensions) matches Claude Code's runtime exactly. Node.js had a different TLS fingerprint visible at the network level. Set `DARIO_NO_BUN=1` to disable.
+- **Session ID rotation** — Each request gets a fresh session ID, matching CC `--print` behavior where each invocation creates a new session. A persistent session ID across many rapid requests was a behavioral signal.
+- **Rate governor** — 500ms minimum interval between requests prevents inhuman request cadence. Configurable via `DARIO_MIN_INTERVAL_MS`. CC `--print` takes ~2-3s per invocation — rapid-fire requests don't match any legitimate usage pattern.
+
+## [3.1.1] - 2026-04-12
+
+### Fixed
+- **Unicode encoding in template data** — System prompt and tool descriptions had corrupted em-dashes from Windows encoding. Regenerated from MITM capture with correct UTF-8. Byte-exact match confirmed.
+- **Haiku 400 error** — `context-1m-2025-08-07` beta was sent unconditionally but is only valid for Sonnet 4.6. Now model-conditional.
+
+## [3.1.0] - 2026-04-12
+
+### Changed
+- **Full CC fidelity** — Complete overhaul of template replay. All data now auto-extracted from MITM capture of CC v2.1.104 rather than manually reconstructed.
+- **25 tool definitions** from MITM capture (was 11 hardcoded). Includes CronCreate, CronDelete, CronList, EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree, Monitor, RemoteTrigger, ScheduleWakeup, Skill, TaskOutput, TaskStop, TodoWrite.
+- **CC's 25KB system prompt** injected as base, client prompt appended (was using client prompt only).
+- **Template data** stored as JSON file (`cc-template-data.json`), loaded at runtime for easy updates when CC changes.
+- **User-Agent** removed `workload/cron` (CC doesn't send it for standard requests).
+- **Billing header** removed `cc_workload` (CC only adds it for actual cron jobs).
+
+## [3.0.4] - 2026-04-12
+
+### Fixed
+- **Token refresh spam** — When refresh failed, every subsequent request retried immediately, flooding the console. Added 60s cooldown between retry cycles. Falls back to current token during cooldown.
+- **Silent refresh failures** — Now logs HTTP status and response body on refresh failure.
+
+## [3.0.3] - 2026-04-12
+
+### Changed
+- **MITM-verified beta set** — Reduced from 14 to exact 8 betas CC actually sends at runtime (was sending 6 extras that CC only adds conditionally). Exact order from MITM capture.
+- **Body key order** — Matched to MITM capture: `model, messages, system, tools, metadata, max_tokens, thinking, context_management, output_config, stream`.
+- **Removed `temperature: 1`** — CC doesn't send it for Agent SDK requests.
+
+## [3.0.2] - 2026-04-12
+
+### Changed
+- **Binary RE of CC v2.1.104** — Reverse-engineered latest binary (built 2026-04-12). Found `cc_workload` field, workload tracking in User-Agent, 7 new beta registrations (2 gated/unreleased).
+- **Tool arg translation** — Unmapped tools get arguments translated to match CC tool schemas.
+- **Tool distribution** — Unmapped tools spread across Bash/Read/Grep/Glob/WebSearch/WebFetch instead of all becoming Bash.
+- **tool_result sanitization** — Strips non-standard fields, truncates >30K content.
+- **Framework scrubbing** — Strips framework identifiers from system prompts.
+- **anthropic-version header** — Hardcoded to `2023-06-01` in non-passthrough mode.
+
+## [3.0.1] - 2026-04-12
+
+### Fixed
+- **ESM require crash** — `require('node:child_process')` in `oauth.ts` replaced with `await import()`. Fixes #15.
+- **403 error message** — Now lists supported paths (`POST /v1/messages`, `POST /v1/chat/completions`, `GET /v1/models`). Fixes #16.
+
+## [3.0.0] - 2026-04-11
+
+### Changed
+- **Template replay architecture** -- Complete rewrite of the stealth layer. Instead of transforming client requests signal-by-signal (tool names, field order, effort, max_tokens), dario now replaces the entire request with a CC template. Only conversation content is preserved from the client request. The upstream sees Claude Code's exact tool definitions, exact field structure, exact everything. Tested with 40 third-party tools -- all route to five_hour. Previous approach failed at 40 tools, 20+ tool names, and various field mismatches.
+- **CC tool definitions** -- Real Claude Code tool schemas (Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, NotebookEdit, Agent, AskUserQuestion) are sent upstream regardless of what the client sends. Client tool calls are mapped to CC equivalents and reverse-mapped in responses.
+
+## [2.11.0] - 2026-04-11
+
+### Added
+- **Tool count cap** -- Tools capped at 22 (CC range). Excess consolidated into dispatch wrapper.
+- **Cache control stripping** -- Client cache_control removed from messages.
+
+## [2.10.0] - 2026-04-11
+
+### Added
+- **Tool name rewriting** -- Anthropic fingerprints on tool names. Non-CC names (exec, wiki_apply, honcho_context, etc.) trigger overage classification. Dario now rewrites tool names to CC equivalents (exec to Bash, read to Read, web_search to WebSearch) and prefixes unknown tools with mcp_ (matching real CC MCP naming). Reverse-mapped in responses so clients see original names. (#12)
+
+### Changed
+- **output_config.effort forced to medium** -- Previously only set when missing, now overrides client value. CC always sends medium; high is a fingerprint.
+
+## [2.9.5] - 2026-04-11
+
+### Fixed
+- **`max_tokens` capped at 64000** — Claude Code always sends `max_tokens: 64000`. Clients sending `128000` (e.g. OpenClaw) were triggering overage classification because the value doesn't match the real CC fingerprint. Now hard-capped regardless of client value. (#12)
+
+## [2.9.3] - 2026-04-11
+
+### Changed
+- **Removed `@anthropic-ai/sdk` dependency** — was listed as production dep but never imported. dario now has zero runtime dependencies.
+- **README updated** — added OpenClaw config example, technical deep dive links (Discussions #1, #8, #9), corrected line counts and dep info.
+
+## [2.9.2] - 2026-04-11
+
+### Fixed
+- **CLI mode: array-format system prompts** — `claude --print` only accepts string system prompts. When clients (e.g. OpenClaw) send `system` as an array of content blocks (valid per Anthropic API spec), CLI mode now flattens the blocks to a joined string before passing to the binary. Previously returned `400 Invalid request body`.
+
+## [2.9.1] - 2026-04-11
+
+### Changed
+- Updated README with v2.9.0 stealth layer documentation
+- Corrected effort default from `high` to `medium` in feature list
+- Removed `service_tier: auto` reference (now scrubbed)
+- Updated passthrough mode description (Hermes/OpenClaw work through default mode)
+
+## [2.9.0] - 2026-04-11
+
+### Added
+- **Thinking block stripping**: Strips `thinking` type blocks from all assistant messages before forwarding upstream. The API's `context_management: clear_thinking` does NOT reduce input token billing — tokens are counted before server-side edits. Client-side stripping is the only way to prevent stale thinking traces from burning the 5h window. Reduces per-request input tokens by 50-80% on multi-turn conversations with thinking enabled.
+- **Non-CC field scrubbing**: Removes `temperature`, `top_p`, `top_k`, `stop_sequences`, and `service_tier` from requests. Real Claude Code never sends these fields — their presence is a detectable fingerprint.
+- **JSON field reordering**: Rebuilds the request body with Claude Code's exact field order (`model`, `messages`, `system`, `max_tokens`, `thinking`, `output_config`, `context_management`, `metadata`, `stream`, `tools`). JSON field order is a fingerprint signal.
+- **System prompt normalization**: Merges any number of system prompt blocks into exactly 3 (billing tag, agent identity, merged system text). Real Claude Code always sends exactly 3 blocks — sending 4+ is detectable.
+- **Beta deduplication**: Client-provided betas are deduplicated against the base set before appending, preventing duplicate beta headers upstream.
+
+### Changed
+- **Beta set updated**: Added `fine-grained-tool-streaming-2025-05-14` and `fast-mode-2026-02-01` from Hermes framework analysis
+
+## [2.8.7] - 2026-04-10
+
+### Fixed
+- **`cch` now uses `crypto.randomBytes`**: MITM testing proved real Claude Code generates a random 5-hex-char `cch` per request (10 identical requests → 10 unique values). Previous SHA-256 approach was deterministic and detectable.
+- **Removed `x-client-request-id` header**: Real Claude Code does not send this header for external OAuth sessions (only for firstParty deployments). Dario was adding it, creating a detectable mismatch.
+- **Confirmed build tag algorithm**: Verified `Oz$` via 5 identical captures — build tag is deterministic from `SHA-256(seed + user_chars[4,7,20] + version).slice(0,3)`, confirmed matching real Claude Code output.
+
+## [2.8.6] - 2026-04-10
+
+### Changed
+- **System prompt structure parity**: System prompt now sent as 3 separate blocks matching real Claude Code — billing tag (no cache), agent identity (1h cache), system prompt (1h cache) — instead of a single concatenated string
+- **Beta header order**: Reordered to match real Claude Code (`claude-code-20250219` first, not `oauth` first)
+- **Default effort**: Changed from `high` to `medium` matching Claude Code's default
+- **Default max_tokens**: Set to 64000 matching Claude Code's default (was 16000)
+- **Runtime version**: Reports `v24.3.0` (Bun's Node compat version) instead of actual Node version
+- **Removed `service_tier: auto`**: Real Claude Code does not send this field
+
+## [2.8.5] - 2026-04-10
+
+### Fixed
+- **Billing reclassification after sustained use**: Fixed `cch` checksum from stale `98638` — Anthropic validates this server-side and reclassifies requests to overage billing when the checksum is invalid (#7)
+- **Per-request billing tag computation**: Build tag and `cch` checksum are now computed dynamically per request using the same SHA-256 algorithm as real Claude Code (extracted via binary RE), instead of static values that could trigger server-side detection
+- **Request fingerprint parity**: `x-stainless-timeout` now varies per request matching real Claude Code behavior
+- **Stale fallback version**: Default version bumped from `2.1.96` to `2.1.100`
+
+### Credits
+- @belangertrading — reported billing reclassification pattern, provided debug data that led to root cause (#7)
+
+## [2.8.3] - 2026-04-10
+
+### Fixed
+- **CLI E2BIG on large conversations**: System prompt now written to temp file via `--append-system-prompt-file` instead of passed as command-line argument, removing the OS arg size limit (~2MB) that crashed multi-turn agent conversations (#7)
+- **npm provenance**: Re-published via CI for signed provenance attestation
+
+## [2.8.1] - 2026-04-10
+
+### Fixed
+- **Haiku 400 on effort parameter**: `output_config.effort` is now skipped for Haiku 4.5, which does not support it
+
+### Changed
+- **Code reduction**: 1,618 → 1,505 lines (−7%) — merged duplicate CLI detection, extracted shared CLI response handler, removed dead token anomaly detection and extended context cooldown
+- **Cleaner imports**: Removed redundant `chmod` call, replaced `require('fs')` with proper ESM import, explicit `scopes` field instead of object spread
+
+## [2.8.0] - 2026-04-10
+
+### Added
+- **`--passthrough` mode**: Thin proxy — OAuth swap only, no billing tag, thinking, service_tier, or device identity injection. For Hermes/OpenClaw/tools that need exact protocol fidelity
+- **CLI streaming**: `--cli` mode now returns SSE when client requests `stream: true` (both Anthropic and OpenAI formats)
+- **`output_config.effort`**: Passes through client effort level or defaults to `high` for reasoning models
+- **Enriched 429 errors**: Rate limit errors now include utilization %, limiting window, and reset time instead of just "Error"
+- **E2E test suite**: `npm run e2e` — 12 tests covering all models, streaming, OpenAI compat, tool use, rate limit headers
+
+## [2.7.1] - 2026-04-10
+
+### Fixed
+- **Haiku 400 error**: Adaptive thinking and context management are now skipped for Haiku 4.5, which does not support thinking
+
+## [2.7.0] - 2026-04-10
+
+### Changed
+- **Adaptive thinking**: Switched from deprecated `thinking: { type: 'enabled', budget_tokens: N }` to `{ type: 'adaptive' }` — model decides when and how much to think, matching Claude Code behavior exactly
+- **Priority capacity**: Requests now include `service_tier: 'auto'` to access priority capacity pool when available (50% fallback allocation confirmed via response headers)
+- **Effort beta**: Added `effort-2025-11-24` beta flag matching CLI v2.1.100
+
+## [2.6.0] - 2026-04-10
+
+### Fixed
+- **Opus/Sonnet 429 at high utilization**: Requests now get priority routing through Anthropic's model-specific rate limits instead of the overall API quota. Previously, Opus/Sonnet would 429 when overall 7d utilization was high, even though model-specific limits had headroom.
+
+### Added
+- **Priority routing**: Injects Claude Code billing classification into system prompt, matching native CLI behavior. This activates per-model rate limit evaluation (e.g., `7d_sonnet: 5%` instead of overall `7d: 100%`).
+- **Automatic CLI fallback**: If the API returns 429 and Claude Code is installed, transparently retries through `claude --print` with SSE conversion for streaming clients. Works for both Anthropic and OpenAI endpoints.
+
+### Credits
+- @belangertrading — reported 429 issue, diagnosed OAuth vs CLI routing difference, built the CLI fallback workaround (#6)
+
+## [2.5.0] - 2026-04-10
+
+### Changed
+- **Full Claude Code feature parity**: Request body now matches native Claude Code exactly — `thinking`, `context_management`, full beta set, device identity
+- **Billing classification confirmed**: MITM analysis proves billing is determined solely by the OAuth token's subscription type, not by headers, betas, or metadata. All previous billing-related workarounds were unnecessary.
+- Restored `context-management-2025-06-27` and `prompt-caching-scope-2026-01-05` beta flags (safe for all subscription types — confirmed via A/B testing against Anthropic API)
+- Only `extended-cache-ttl-*` is filtered from client betas (the only prefix that actually requires Extra Usage)
+
+### Added
+- **Extended thinking**: Automatically enables `thinking` with budget matching `max_tokens` (matches Claude Code default behavior)
+- **Context management**: Injects `context_management` body field for automatic thinking compaction
+- **Billing classification logging**: First request and verbose mode log the unified rate limit claim and overage utilization
+
+### Credits
+- @belangertrading — reported billing classification issue, tested v2.3.1 through v2.5.0, confirmed fix via response header analysis (#4)
+
+## [2.4.0] - 2026-04-10
+
+### Fixed
+- **Max plan billing classification**: Requests now include device identity metadata (`metadata.user_id`) matching native Claude Code — prevents Anthropic from routing usage to Extra Usage instead of Max plan allocation
+- Append `?beta=true` to upstream API URL matching native Claude Code behavior
+- Beta flags updated to match Claude Code v2.1.98 (adds `advisor-tool-2026-03-01`, restores `context-management` and `prompt-caching-scope`)
+
+### Added
+- **Billable beta filtering**: Strips `extended-cache-ttl-*`, `context-management-*`, `prompt-caching-scope-*` from client-provided betas to prevent surprise Extra Usage charges
+- **Orchestration tag sanitization**: Strips agent-injected XML tags (`<system-reminder>`, `<env>`, `<task_metadata>`, etc.) from message content before forwarding
+- **Token anomaly detection**: Warns on suspicious patterns — context spike (>60% input growth), output explosion (>2x previous turn)
+- **1M extended context support**: `opus1m` and `sonnet1m` model aliases with automatic 1-hour cooldown fallback on Extra Usage failure
+
+## [2.3.1] - 2026-04-09
+
+### Fixed
+- Remove `context-management-2025-06-27` and `prompt-caching-scope-2026-01-05` from default beta flags — these may require Extra Usage and cause billing errors for Max users with Extra Usage disabled
+- Only essential betas are included by default (`oauth`, `interleaved-thinking`, `claude-code`); client-provided betas still pass through
+
+## [2.3.0] - 2026-04-09
+
+### Fixed
+- OpenAI streaming now translates tool_use blocks (previously silently dropped — tools via `/v1/chat/completions` in streaming mode now work)
+- Verbose logging no longer leaks query parameters (uses path only)
+- Background token refresh now handles 'expired' status, not just 'expiring'
+
+### Added
+- Concurrency control: max 10 concurrent upstream requests with FIFO queuing (prevents request flooding)
+
+## [2.2.4] - 2026-04-09
+
+### Changed
+- Move AI reviews to top of README as 3-column trust table
+- Add Trust link to nav bar
+
+## [2.2.3] - 2026-04-09
+
+### Added
+- Google Gemini independent code review in README
+
+## [2.2.2] - 2026-04-09
+
+### Added
+- GitHub Copilot (Microsoft) independent code review in README
+
+## [2.2.1] - 2026-04-09
+
+### Added
+- Grok (xAI) independent code review testimonial in README
+
+## [2.2.0] - 2026-04-09
+
+### Security
+- Add 30-second body read timeout to prevent slow-loris attacks
+- Cap CLI backend stdout/stderr at 5MB to prevent OOM on runaway output
+- Broaden Bearer token redaction regex — tokens with dots/slashes no longer leak
+- Add security headers to all responses (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cache-Control: no-store`)
+
+### Fixed
+- CLI backend (`--cli`) now works with OpenAI-compatible endpoint (`/v1/chat/completions`)
+  - Previously, `--cli` + Cursor/Continue would bypass CLI and hit API directly
+  - Now translates OpenAI → Anthropic before CLI, and Anthropic → OpenAI after
+
+### Added
+- `dario version` / `dario --version` / `dario -V` command
+
+## [2.1.2] - 2026-04-09
+
+### Changed
+- README: lead with Cursor/Continue in tool list for discoverability
+- README: add "Also by AskAlf" ecosystem section
+- README: fix line count (~1000 → ~1100)
+
+## [2.1.1] - 2026-04-09
+
+### Security
+- Validate model names before passing to CLI spawn (alphanumeric, hyphens, dots only)
+- Cap SSE stream buffer at 1MB to prevent OOM on malformed responses
+- Sanitize CLI stderr output before forwarding to clients
+
+## [2.1.0] - 2026-04-09
+
+### Added
+- Optional proxy authentication via `DARIO_API_KEY` env var with timing-safe comparison
+- JWT and Bearer token redaction in error sanitization
+- `sanitizeError` exported from public API
+
+### Changed
+- CORS scoped to actual proxy port instead of all of localhost
+- Shared `sanitizeError` across all error paths (eliminated duplication)
+
+### Security
+- Credit: @GodsBoy (cherry-picked from PR #2), @belangertrading (billing investigation #4)
+
+## [2.0.0] - 2026-04-08
+
+### Added
+- **OpenAI API compatibility** — `POST /v1/chat/completions` endpoint
+- Automatic model mapping (gpt-4 → opus, gpt-3.5-turbo → haiku, etc.)
+- OpenAI SSE streaming format translation
+- OpenAI-compatible `/v1/models` endpoint
+- Works with any OpenAI SDK, Cursor, Continue, LiteLLM, and more
+
+## [1.2.1] - 2026-04-08
+
+### Fixed
+- `/health` and `/status` endpoints now handle query parameters correctly
+- Removed 76 lines of dead code (startOAuthFlow, exchangeCode, unused imports)
+- Deduplicated OAuth scope string into constant
+
+### Added
+- Trust & Transparency section in README with verification commands
+- CHANGELOG.md with full version history
+- CODEOWNERS file for code review enforcement
+- npm audit in CI pipeline (`--production --audit-level=high`)
+- Security badges (npm, CI, CodeQL, license, downloads)
+- Branch protection (CI required before merge)
+- Response SLA in SECURITY.md (48h ack, 7d fix for critical)
+
+## [1.2.0] - 2026-04-08
+
+### Added
+- Auto-detect Claude Code credentials (`~/.claude/.credentials.json`) — no separate OAuth needed
+- Automatic OAuth flow with local callback server (same as Claude Code)
+- Login auto-starts proxy when credentials are found
+- Session presence heartbeat for improved routing
+- `anthropic-client-platform` and `context-management` beta headers
+- Forward all upstream rate limit headers to clients
+- Query parameter handling for `/health` and `/status` endpoints
+
+### Changed
+- `dario login` now detects Claude Code credentials first, falls back to auto OAuth
+- Updated all documentation for accuracy against actual code behavior
+- SSRF docs clarified: hardcoded allowlist approach, not IP-range blocking
+
+### Removed
+- Manual URL-paste OAuth flow (replaced by automatic local callback server)
+- Unused `ask()` function and `readline` import
+
+## [1.1.3] - 2026-04-08
+
+### Changed
+- Updated README with accurate rate limit documentation references
+- Corrected claims about rate limit visibility (Claude Code has `/usage` and statusline)
+
+## [1.1.0] - 2026-04-08
+
+### Added
+- `--cli` backend mode: route through Claude Code binary to bypass rate limits
+- `--model` flag with shortcuts (`opus`, `sonnet`, `haiku`)
+- Server error handler for EADDRINUSE
+- Rate limit header forwarding from upstream
+
+### Changed
+- Default model is passthrough (client decides)
+- Updated all examples to use `claude-opus-4-6`
+
+## [1.0.5] - 2026-04-07
+
+### Fixed
+- SSRF: replaced URL prefix check with hardcoded path allowlist
+- CodeQL alerts: stack trace exposure, SSRF flow
+
+### Added
+- npm provenance via GitHub Actions (SLSA attestation)
+- CodeQL weekly security scanning
+- SECURITY.md with full vulnerability disclosure policy
+- CI matrix testing on Node 18, 20, 22
+
+## [1.0.0] - 2026-04-07
+
+### Added
+- Initial release
+- PKCE OAuth flow for Claude subscriptions
+- Local HTTP proxy implementing Anthropic Messages API
+- Streaming and non-streaming support
+- Token auto-refresh every 15 minutes
+- Credential caching with 10s TTL
+- Atomic file writes for credential storage
+- 127.0.0.1 binding (localhost only)
+- CORS support for browser apps
+- 10MB body size limit
+- Token pattern redaction in all error messages

@@ -1,0 +1,2701 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
+import { readFileSync, readdirSync, createWriteStream, type WriteStream } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { arch, platform } from 'node:process';
+import { getAccessToken, getStatus } from './oauth.js';
+import { buildCCRequest, parseEffortSuffix, reverseMapResponse, createStreamingReverseMapper, orderHeadersForOutbound, CC_TEMPLATE, type ToolMapping, type RequestContext, type EffortValue } from './cc-template.js';
+import { describeTemplate, detectDrift, checkCCCompat } from './live-fingerprint.js';
+import { AccountPool, computeStickyKey, parseRateLimits, modelFamily, isInAuthCooldown, authCooldownMs, type PoolAccount } from './pool.js';
+import { Analytics, billingBucketFromClaim, type RequestRecord } from './analytics.js';
+import { OverageGuard, buildHaltErrorBody, type HaltState } from './overage-guard.js';
+import { notify as osNotify } from './notify.js';
+import { loadAllAccounts, loadAccount, refreshAccountToken, resyncLoginFromCredentialsIfStale } from './accounts.js';
+import { resolveAccountProxy, classifyProxy, isBunRuntime } from './socks-bridge.js';
+import { getOpenAIBackend, isOpenAIModel, forwardToOpenAI, type BackendCredentials } from './openai-backend.js';
+import { RequestQueue, QueueFullError, QueueTimeoutError, DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_QUEUED, DEFAULT_QUEUE_TIMEOUT_MS } from './request-queue.js';
+import { redactSecrets } from './redact.js';
+
+const ANTHROPIC_API = 'https://api.anthropic.com';
+const DEFAULT_PORT = 3456;
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB — generous for large prompts, prevents abuse
+const UPSTREAM_TIMEOUT_MS = 300_000; // 5 min — matches Anthropic SDK default
+const BODY_READ_TIMEOUT_MS = 30_000; // 30s — prevents slow-loris on body reads
+const DEFAULT_HOST = '127.0.0.1';
+
+// A host is "loopback" if it's one of the well-known localhost literals.
+// Used to decide whether to warn at startup about binding to a reachable
+// interface — binding anywhere else means other machines can reach the
+// proxy and should only be done with DARIO_API_KEY set.
+function isLoopbackHost(host: string): boolean {
+  if (host === '127.0.0.1' || host === '::1' || host === 'localhost') return true;
+  return host.startsWith('127.');
+}
+
+// Concurrency control: see src/request-queue.ts for the bounded queue
+// (replaced the v3.30.x-and-earlier simple unbounded semaphore in dario#80).
+
+// Billing tag hash seed — matches Claude Code's value
+const BILLING_SEED = '59cf53e54c78';
+
+// Compute per-request build tag:
+// SHA-256(seed + chars[4,7,20] of user message + version).slice(0,3)
+function computeBuildTag(userMessage: string, version: string): string {
+  const chars = [4, 7, 20].map(i => userMessage[i] || '0').join('');
+  return createHash('sha256').update(`${BILLING_SEED}${chars}${version}`).digest('hex').slice(0, 3);
+}
+
+// Per-request cch: random 5-char hex value each request (Claude Code does the same).
+function computeCch(): string {
+  return randomBytes(3).toString('hex').slice(0, 5);
+}
+
+// Detect installed Claude Code version for the build-tag computation.
+// Falls back to a known-good version if claude isn't on PATH.
+function detectCliVersion(): string {
+  try {
+    const out = execSync('claude --version', { timeout: 5000, stdio: 'pipe' }).toString().trim();
+    return out.match(/^([\d]+\.[\d]+\.[\d]+)/)?.[1] ?? '2.1.100';
+  } catch {
+    return '2.1.100';
+  }
+}
+
+/** Extract first user message text from a request body for billing tag computation. */
+function extractFirstUserMessage(body: Record<string, unknown>): string {
+  const messages = body.messages as Array<{ role?: string; content?: unknown }> | undefined;
+  if (!messages) return '';
+  const userMsg = messages.find(m => m.role === 'user');
+  if (!userMsg) return '';
+  if (typeof userMsg.content === 'string') return userMsg.content;
+  if (Array.isArray(userMsg.content)) {
+    const textBlock = (userMsg.content as Array<{ type?: string; text?: string }>).find(b => b.type === 'text');
+    return textBlock?.text ?? '';
+  }
+  return '';
+}
+
+// Session ID behavior (single-account mode):
+//   v3.18 rotated per request — which was itself a fingerprint. Real CC
+//   rotates roughly once per conversation, not per call. A user who has
+//   distinct session-ids for every request looks nothing like a CC user.
+//
+//   v3.19 keeps the id stable through a conversation window and rotates
+//   only after an idle gap long enough to credibly indicate a new
+//   conversation. Pool mode still uses the per-account identity.sessionId
+//   (stable across the account's lifetime).
+//
+//   v3.28 generalises the single hardcoded 15-min window into a tunable
+//   registry (see src/session-rotation.ts) with optional jitter, max-age,
+//   and per-client keying. SESSION_ID below is kept only as a mirror of
+//   the default single-account session so out-of-band consumers (presence
+//   ping, diagnostic logs) can read the most recent id without going
+//   through the registry. It's refreshed after every dispatch-path call
+//   that assigns a new id.
+let SESSION_ID: string = randomUUID();
+const OS_NAME = platform === 'win32' ? 'Windows' : platform === 'darwin' ? 'MacOS' : 'Linux';
+
+// Claude Code device identity — required for Max plan billing classification.
+// Without metadata.user_id, Anthropic classifies requests as third-party and
+// routes them to Extra Usage billing instead of the Max plan allocation.
+function loadClaudeIdentity(): { deviceId: string; accountUuid: string } {
+  const paths = [
+    join(homedir(), '.claude.json'),              // Windows / Linux / macOS (live config)
+    join(homedir(), '.claude', '.claude.json'),    // Alternative location
+    join(homedir(), '.claude', 'claude.json'),
+  ];
+  // Also check backup files as fallback
+  try {
+    const backupDir = join(homedir(), '.claude', 'backups');
+    const files = readdirSync(backupDir) as string[];
+    const backups = files
+      .filter((f: string) => f.startsWith('.claude.json.backup.'))
+      .sort()
+      .reverse();
+    for (const b of backups) paths.push(join(backupDir, b));
+  } catch { /* no backups dir */ }
+
+  for (const p of paths) {
+    try {
+      const data = JSON.parse(readFileSync(p, 'utf-8'));
+      if (data.userID) {
+        // accountUuid lives inside oauthAccount, not at root
+        const accountUuid = data.oauthAccount?.accountUuid ?? data.accountUuid ?? '';
+        return { deviceId: data.userID, accountUuid };
+      }
+    } catch { /* try next */ }
+  }
+  return { deviceId: '', accountUuid: '' };
+}
+
+// Model shortcuts — users can pass short names
+const MODEL_ALIASES: Record<string, string> = {
+  'opus': 'claude-opus-4-8',
+  'opus47': 'claude-opus-4-7',
+  'opus46': 'claude-opus-4-6',
+  'opus1m': 'claude-opus-4-7[1m]',
+  'sonnet': 'claude-sonnet-4-6',
+  'sonnet1m': 'claude-sonnet-4-6[1m]',
+  'haiku': 'claude-haiku-4-5',
+};
+
+/**
+ * Resolve a Claude-side model name through MODEL_ALIASES if it's a short
+ * alias (`opus`/`sonnet`/`haiku`/etc.), otherwise pass through unchanged.
+ *
+ * Used at request time on the provider-prefix path so `claude:opus` arrives
+ * upstream as `claude-opus-4-6` rather than the bare `opus` (which Anthropic
+ * 400's). Critical for Cursor BYOK setups (dario#190) where users have to
+ * pick a colon-prefixed model name to dodge Cursor's built-in `claude-*`
+ * name collision — which means the natural shorthand is `claude:opus`, and
+ * that needs to Just Work.
+ */
+export function resolveClaudeAlias(model: string): string {
+  return MODEL_ALIASES[model] ?? model;
+}
+
+// Provider prefix in the `model` field — `<provider>:<model>`. Forces
+// routing regardless of model-name regex. Only recognized prefixes are
+// parsed, so ollama-style `llama3:8b` (without a recognized prefix)
+// passes through untouched and reaches the configured openai-compat
+// backend as-is.
+const PROVIDER_PREFIXES: Record<string, 'openai' | 'claude'> = {
+  openai: 'openai',
+  openrouter: 'openai',
+  groq: 'openai',
+  compat: 'openai',
+  local: 'openai',
+  claude: 'claude',
+  anthropic: 'claude',
+};
+
+export function parseProviderPrefix(model: string): { provider: 'openai' | 'claude'; model: string } | null {
+  const idx = model.indexOf(':');
+  if (idx <= 0) return null;
+  const prefix = model.slice(0, idx).toLowerCase();
+  const provider = PROVIDER_PREFIXES[prefix];
+  if (!provider) return null;
+  const stripped = model.slice(idx + 1);
+  if (!stripped) return null;
+  return { provider, model: stripped };
+}
+
+// Beta prefixes that require Extra Usage to be ENABLED on the account.
+// context-management and prompt-caching-scope are safe — billing is determined
+// solely by the OAuth token's subscription type, not by beta flags.
+// Only extended-cache-ttl actually requires Extra Usage availability.
+const BILLABLE_BETA_PREFIXES = [
+  'extended-cache-ttl-',   // Extended cache TTLs — requires Extra Usage enabled
+];
+
+/** Filter out billable betas from client-provided beta header. */
+function filterBillableBetas(betas: string): string {
+  return betas.split(',').map(b => b.trim()).filter(b =>
+    b.length > 0 && !BILLABLE_BETA_PREFIXES.some(p => b.startsWith(p))
+  ).join(',');
+}
+
+// Orchestration tags injected by agents (Aider, Cursor, OpenCode, etc.)
+// that confuse Claude when passed through. Strip before forwarding.
+export const ORCHESTRATION_TAG_NAMES = [
+  'system-reminder', 'env', 'system_information', 'current_working_directory',
+  'operating_system', 'default_shell', 'home_directory', 'task_metadata',
+  'directories', 'thinking',
+  'agent_persona', 'agent_context', 'tool_context', 'persona', 'tool_call',
+];
+
+/**
+ * Build the regex list that actually strips orchestration tags.
+ *
+ * `preserveTags` selects which tags to KEEP in the outbound body.
+ *   undefined       → strip every tag in ORCHESTRATION_TAG_NAMES (default)
+ *   Set(['*'])      → preserve all tags (strip none)
+ *   Set(['thinking']) → strip everything except `<thinking>...</thinking>`
+ *
+ * Each tag produces two patterns — the wrapper form (`<tag>...</tag>`) and
+ * the self-closing form (`<tag ... />`) — so callers that emit either shape
+ * get the same treatment.
+ *
+ * dario#78 (Gemini review push-back).
+ */
+export function buildOrchestrationPatterns(preserveTags?: Set<string>): RegExp[] {
+  if (preserveTags?.has('*')) return [];
+  const effective = preserveTags
+    ? ORCHESTRATION_TAG_NAMES.filter(tag => !preserveTags.has(tag))
+    : ORCHESTRATION_TAG_NAMES;
+  return effective.flatMap(tag => [
+    new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi'),
+    new RegExp(`<${tag}\\b[^>]*\\/>`, 'gi'),
+  ]);
+}
+
+const ORCHESTRATION_PATTERNS_DEFAULT = buildOrchestrationPatterns();
+
+/** Strip orchestration wrapper tags from message content. */
+function sanitizeContent(text: string, patterns: RegExp[]): string {
+  let result = text;
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, '');
+  }
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Strip orchestration tags from all messages in a request body.
+ *
+ * Pass `preserveTags` (a Set of tag names, or `Set(['*'])` for all) to
+ * opt any tag out of the scrub. dario#78.
+ */
+export function sanitizeMessages(body: Record<string, unknown>, preserveTags?: Set<string>): void {
+  const messages = body.messages as Array<{ role: string; content: unknown }> | undefined;
+  if (!messages) return;
+  const patterns = preserveTags === undefined ? ORCHESTRATION_PATTERNS_DEFAULT : buildOrchestrationPatterns(preserveTags);
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') {
+      msg.content = sanitizeContent(msg.content, patterns);
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block === 'object' && block && 'text' in block && typeof (block as { text: string }).text === 'string') {
+          (block as { text: string }).text = sanitizeContent((block as { text: string }).text, patterns);
+        }
+      }
+      // Drop text blocks that became empty after orchestration-tag scrubbing.
+      // CC v2.1.112 and some client wrappers split per-reminder system-reminders
+      // into separate content blocks; scrubbing leaves each as {type:'text',text:''}
+      // which Anthropic rejects with "text content blocks must be non-empty"
+      // (dario#54). Keep non-text blocks (tool_result, tool_use, image) intact.
+      msg.content = (msg.content as Array<Record<string, unknown>>).filter(b => {
+        if (typeof b !== 'object' || b === null) return false;
+        if ((b as { type?: string }).type === 'text' && (b as { text?: string }).text === '') return false;
+        return true;
+      });
+    }
+  }
+}
+
+/**
+ * Scrub non-Claude-Code fields and normalize field ordering.
+ * Real Claude Code never sends these fields. Their presence is a fingerprint.
+ * JSON field order is also detectable — Claude Code always sends fields in a
+ * specific order. We rebuild the object to match.
+ */
+
+// OpenAI model names → Anthropic (fallback if client sends GPT names)
+const OPENAI_MODEL_MAP: Record<string, string> = {
+  'gpt-5.4': 'claude-opus-4-8',
+  'gpt-5.4-mini': 'claude-sonnet-4-6',
+  'gpt-5.4-nano': 'claude-haiku-4-5',
+  'gpt-5.3': 'claude-opus-4-6',
+  'gpt-4': 'claude-opus-4-6',
+  'gpt-3.5-turbo': 'claude-haiku-4-5',
+};
+
+/** Translate OpenAI chat completion request → Anthropic Messages request. */
+function openaiToAnthropic(body: Record<string, unknown>, modelOverride: string | null): Record<string, unknown> {
+  const messages = body.messages as Array<{ role: string; content: unknown }> | undefined;
+  if (!messages) return body;
+  const systemMessages = messages.filter(m => m.role === 'system');
+  const nonSystemMessages = messages.filter(m => m.role !== 'system');
+  const model = modelOverride || OPENAI_MODEL_MAP[String(body.model || '')] || String(body.model || 'claude-opus-4-6');
+  const result: Record<string, unknown> = {
+    model,
+    messages: nonSystemMessages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
+    max_tokens: body.max_tokens ?? body.max_completion_tokens ?? 8192,
+  };
+  if (systemMessages.length > 0) result.system = systemMessages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n');
+  if (body.stream) result.stream = true;
+  if (body.temperature != null) result.temperature = body.temperature;
+  if (body.top_p != null) result.top_p = body.top_p;
+  if (body.stop) result.stop_sequences = Array.isArray(body.stop) ? body.stop : [body.stop];
+  return result;
+}
+
+/** Translate Anthropic Messages response → OpenAI chat completion response. */
+function anthropicToOpenai(body: Record<string, unknown>): Record<string, unknown> {
+  const text = (body.content as Array<{ type: string; text?: string }> | undefined)?.find(c => c.type === 'text')?.text ?? '';
+  const u = body.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+  return {
+    id: `chatcmpl-${(body.id as string || '').replace('msg_', '')}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model,
+    choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: body.stop_reason === 'end_turn' ? 'stop' : 'length' }],
+    usage: { prompt_tokens: u?.input_tokens ?? 0, completion_tokens: u?.output_tokens ?? 0, total_tokens: (u?.input_tokens ?? 0) + (u?.output_tokens ?? 0) },
+  };
+}
+
+/** Translate Anthropic SSE → OpenAI SSE. */
+// Track tool call state across stream chunks
+let _streamToolIndex = 0;
+let _streamToolId = '';
+
+function translateStreamChunk(line: string): string | null {
+  if (!line.startsWith('data: ')) return null;
+  const json = line.slice(6).trim();
+  if (json === '[DONE]') return 'data: [DONE]\n\n';
+  try {
+    const e = JSON.parse(json) as Record<string, unknown>;
+    const ts = Math.floor(Date.now() / 1000);
+
+    if (e.type === 'content_block_start') {
+      const block = e.content_block as { type: string; id?: string; name?: string } | undefined;
+      if (block?.type === 'tool_use' && block.name) {
+        _streamToolId = block.id ?? `call_${_streamToolIndex}`;
+        return `data: ${JSON.stringify({ id: 'chatcmpl-dario', object: 'chat.completion.chunk', created: ts, model: 'claude', choices: [{ index: 0, delta: { tool_calls: [{ index: _streamToolIndex, id: _streamToolId, type: 'function', function: { name: block.name, arguments: '' } }] }, finish_reason: null }] })}\n\n`;
+      }
+    }
+
+    if (e.type === 'content_block_delta') {
+      const d = e.delta as { type: string; text?: string; partial_json?: string } | undefined;
+      if (d?.type === 'text_delta' && d.text)
+        return `data: ${JSON.stringify({ id: 'chatcmpl-dario', object: 'chat.completion.chunk', created: ts, model: 'claude', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] })}\n\n`;
+      if (d?.type === 'input_json_delta' && d.partial_json)
+        return `data: ${JSON.stringify({ id: 'chatcmpl-dario', object: 'chat.completion.chunk', created: ts, model: 'claude', choices: [{ index: 0, delta: { tool_calls: [{ index: _streamToolIndex, function: { arguments: d.partial_json } }] }, finish_reason: null }] })}\n\n`;
+    }
+
+    if (e.type === 'content_block_stop') {
+      if (_streamToolId) {
+        _streamToolIndex++;
+        _streamToolId = '';
+      }
+      return null;
+    }
+
+    if (e.type === 'message_stop') {
+      _streamToolIndex = 0;
+      _streamToolId = '';
+      return `data: ${JSON.stringify({ id: 'chatcmpl-dario', object: 'chat.completion.chunk', created: ts, model: 'claude', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`;
+    }
+  } catch {}
+  return null;
+}
+
+const OPENAI_MODELS_LIST = { object: 'list', data: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'].map(id => ({ id, object: 'model', created: 1700000000, owned_by: 'anthropic' })) };
+
+interface ProxyOptions {
+  port?: number;
+  host?: string;  // Bind address (default: 127.0.0.1)
+  verbose?: boolean;
+  verboseBodies?: boolean; // Dump redacted request bodies on every request (dario#40 -vv / DARIO_LOG_BODIES=1)
+  model?: string;  // Override model in all requests
+  passthrough?: boolean;  // Thin proxy — OAuth swap only, no injection
+  preserveTools?: boolean;  // Keep client tool schemas (for agents with custom tools)
+  hybridTools?: boolean;    // Remap to CC tools but inject request-context fields on return (#33)
+  /**
+   * Merge mode: send CC's canonical tools first, append client tools after
+   * (deduped by name). Mutually exclusive with preserveTools and hybridTools
+   * — proxy startup enforces the mutex. Experimental: Anthropic's billing
+   * classifier may treat the appended tail as a divergence from CC's wire
+   * shape and flip routing. Verify locally with `--verbose` and watch the
+   * billing-bucket line on the first 1-2 requests before relying on it.
+   */
+  mergeTools?: boolean;
+  noAutoDetect?: boolean;   // Disable text-tool-client auto-detection (dario#40, ringge — keep CC fingerprint)
+  strictTls?: boolean;      // Refuse to start if not running under Bun (v3.23, direction #3)
+  pacingMinMs?: number;     // Minimum ms between requests (v3.24, direction #6 — default 500)
+  pacingJitterMs?: number;  // Max uniform-random jitter added on top of pacingMinMs (v3.24 — default 0)
+  // Behavioral smoothing extension (post-response think time + session-start
+  // jitter). All defaults 0 = off — opt-in. Closes the temporal/behavioral
+  // axis that wire-fidelity work doesn't touch: response-length-correlated
+  // read time and per-session opening latency, both present in real CC
+  // traffic and absent in machine-paced agent loops.
+  thinkTimeBaseMs?: number;       // Constant ms added to every think-time sample
+  thinkTimePerTokenMs?: number;   // Additional ms per output token of the previous response
+  thinkTimeJitterMs?: number;     // Max uniform-random jitter added on top
+  thinkTimeMaxMs?: number;        // Upper bound on think time (default 30000)
+  sessionStartMinMs?: number;     // Floor on session-start delay
+  sessionStartJitterMs?: number;  // Max uniform-random jitter on session-start delay
+  // Single-knob behavioral preset (default off). When set, the resolvers
+  // for pacing / think-time / session-start fall through to non-zero
+  // stealth defaults instead of 0, simulating real-CC inter-arrival
+  // statistics. Explicit per-knob flags and env vars still win.
+  stealth?: boolean;
+  drainOnClose?: boolean;   // Keep draining upstream after client disconnects (v3.25, direction #5 — default off)
+  sessionIdleRotateMs?: number;    // Idle ms before session-id rotates (v3.28, direction #1 — default 15min)
+  sessionRotateJitterMs?: number;  // Uniform jitter on idle threshold (v3.28 — default 0)
+  sessionMaxAgeMs?: number;        // Hard cap on session-id lifetime (v3.28 — default off)
+  sessionPerClient?: boolean;      // Key sessions by x-session-id/x-client-session-id header (v3.28 — default off)
+  /**
+   * Opt specific orchestration tags out of the scrub. Undefined = strip all
+   * (default, v3.30 and earlier behaviour). Set(['*']) = preserve all.
+   * Set(['thinking','env']) = strip everything except those two. dario#78.
+   */
+  preserveOrchestrationTags?: Set<string>;
+  /**
+   * Skip the background live-fingerprint refresh entirely. Use the bundled
+   * snapshot even when a live capture would have been possible. For
+   * air-gapped / reproducible-build / CI-harness operators who want no
+   * subprocess capture of the installed CC binary. dario#77.
+   */
+  noLiveCapture?: boolean;
+  /**
+   * Fail-closed mode for the template. If the loaded template is the
+   * bundled snapshot (live capture has never been run or failed), or if
+   * it's a live cache that drifts from the installed CC, refuse to start
+   * rather than silently serve the stale shape. Same philosophy as
+   * --strict-tls. dario#77.
+   */
+  strictTemplate?: boolean;
+  /** Max concurrent in-flight requests. Default 10. dario#80. */
+  maxConcurrent?: number;
+  /** Max requests buffered waiting for a concurrency slot. Default 128. dario#80. */
+  maxQueued?: number;
+  /** Max ms a queued request waits before it times out with 504. Default 60000. dario#80. */
+  queueTimeoutMs?: number;
+  /**
+   * Override the outbound `output_config.effort` value on non-haiku
+   * requests. Default (undefined) pins `'high'`, matching CC 2.1.116's
+   * wire value. `'client'` passes through whatever the client sent (or
+   * falls back to `'high'` if the client didn't include an output_config).
+   * dario#87.
+   */
+  effort?: EffortValue;
+  /**
+   * Override the outbound `max_tokens` value. Default (undefined) pins
+   * `32000` — CC 2.1.116's wire default, below Anthropic's per-model
+   * limits. A number pins a specific value. `'client'` passes through
+   * whatever the client requested (up to Anthropic's per-model ceiling
+   * on the server side). Hermes (and other agents) request up to 128k
+   * for Opus and 64k for Sonnet; the default 32k pin silently truncates
+   * their output capacity. dario#88 (Hermes compat).
+   */
+  maxTokens?: number | 'client';
+  /**
+   * Append-only request log file. One JSON line per completed request,
+   * with secrets scrubbed via redactSecrets. Useful for backgrounded
+   * proxies where stdout is unobserved — `verbose` only helps when you
+   * can watch the foreground. Off by default; opt in with `--log-file`
+   * or `DARIO_LOG_FILE`. Write errors are swallowed (never crash the
+   * request path on a log mishap). dario#XYZ.
+   */
+  logFile?: string;
+  /**
+   * Beta flags to ALWAYS forward upstream regardless of CC's captured
+   * set or the client's anthropic-beta header. Operator declaration
+   * that "I know I want these survived through dario's substitution."
+   * Bypasses `filterBillableBetas`; still respects the per-account
+   * rejected-beta cache (so a flag the upstream 400's gets dropped on
+   * the retry rather than re-sent forever). dario passthrough-betas.
+   *
+   * Sourced from `--passthrough-betas=name1,name2` or
+   * DARIO_PASSTHROUGH_BETAS. Empty / undefined leaves current behavior
+   * unchanged. Surfaced at startup so operators can see exactly which
+   * flags are pinned-on; surfaced again per request when one of the
+   * pinned flags has been rejected and is therefore being dropped.
+   */
+  passthroughBetas?: string[];
+  /**
+   * CC body fields to NOT inject into outbound requests. Allowed values:
+   * `thinking`, `context_management`, `output_config`. Sourced from
+   * `--skip-fields=name1,name2` or `DARIO_SKIP_FIELDS`. Used when an
+   * upstream model 400s on a CC-shaped body field with "Extra inputs are
+   * not permitted" (observed 2026-05-18 with a non-CC SDK client routed
+   * through dario to claude-sonnet-4-6 — `context_management` rejected
+   * despite the beta header). Skipping a field leaves all other CC
+   * fingerprinting intact (headers, beta flags, metadata, OAuth identity),
+   * so Max billing pool routing is unchanged.
+   */
+  skipFields?: string[];
+  /**
+   * When set, an inbound client body's `thinking` field (e.g.
+   * `{type:"enabled", budget_tokens:N}` or `{type:"adaptive"}`) is passed
+   * through to the upstream INSTEAD of dario's default CC-style
+   * `{type:"adaptive"}`. SDK clients hitting dario can therefore explicitly
+   * enable extended thinking with their own budget, rather than being
+   * locked to CC's default adaptive shape.
+   *
+   * Side effect: when honored, dario also suppresses its
+   * `context_management.clear_thinking_*` edit — that edit is tuned for
+   * `type:"adaptive"` and pairing it with `type:"enabled"` 400s upstream.
+   * The client takes responsibility for the request shape as a whole.
+   *
+   * No effect on Haiku (which skips thinking by construction) or when the
+   * client doesn't supply a `thinking` field. CC clients are unaffected.
+   *
+   * Env: DARIO_HONOR_CLIENT_THINKING=1.
+   */
+  honorClientThinking?: boolean;
+  /**
+   * System-prompt mode for the Claude backend. Empirically validated as
+   * unfingerprinted by the billing classifier in docs/research/system-prompt-classifier-study.md.
+   *
+   *   - undefined / 'verbatim' — CC's prompt unchanged (default).
+   *   - 'partial' — strip behavioral constraints (Tone-and-style, Text-output,
+   *     scope/verbosity/comment bullets in Doing-tasks). Recovers ~1.2-2.8x
+   *     output capability on open-ended work; leaves IMPORTANT: refusal
+   *     reminders and tool descriptions intact.
+   *   - 'aggressive' — partial + remove prompt-level RLHF restatements and
+   *     the Executing-actions-with-care section. Adds <3% over partial; RLHF
+   *     refusals on harmful content are unaffected (alignment is in the weights).
+   *   - any other string — used as the literal system prompt text. The CLI
+   *     resolves --system-prompt=<file path> to the file's contents up front
+   *     so the runtime path stays filesystem-pure.
+   *
+   * Sourced from `--system-prompt=<value>` or DARIO_SYSTEM_PROMPT.
+   */
+  systemPrompt?: string;
+  /**
+   * Overage-guard — halt the proxy on the first response carrying
+   * `representative-claim: overage`. Subscribers should never see a
+   * single overage hit during normal operation; one means something
+   * is wrong (wire-shape drift, classifier change, account misconfig)
+   * and continuing to forward bleeds against per-token billing.
+   *
+   * Default: enabled, halt behavior, 30-min cooldown, OS-notify on.
+   * See dario#288.
+   */
+  overageGuardEnabled?: boolean;
+  overageGuardBehavior?: 'halt' | 'warn';
+  overageGuardCooldownMs?: number;
+  overageGuardNotifyOs?: boolean;
+}
+
+/**
+ * One JSON-ND record per completed request. Field set kept narrow to
+ * stay grep-friendly and avoid leaking content. No request bodies, no
+ * tool args, no headers — those still go through `--verbose-bodies` /
+ * DARIO_LOG_BODIES (which has its own opt-in and is foreground-only).
+ */
+export interface ProxyLogEntry {
+  ts: string;
+  req: number;
+  method: string;
+  path: string;
+  model?: string;
+  status?: number;
+  latency_ms?: number;
+  in_tokens?: number;
+  out_tokens?: number;
+  cache_read?: number;
+  cache_create?: number;
+  claim?: string;
+  bucket?: string;
+  account?: string;
+  client?: string;        // detected client family ('arnie', 'cline', 'unknown-non-cc', ...)
+  preserve_tools?: boolean;
+  stream?: boolean;
+  reject?: string;        // reason if rejected before upstream (auth, queue-full, ...)
+  error?: string;         // sanitized error message if request failed
+}
+
+/**
+ * Append a JSON-ND line to the proxy log file. No-op when stream is
+ * null (logFile not configured). Errors are swallowed — log writes
+ * must never break the request path.
+ */
+export function writeLogLine(stream: WriteStream | null, entry: ProxyLogEntry): void {
+  if (!stream) return;
+  try {
+    stream.write(redactSecrets(JSON.stringify(entry)) + '\n');
+  } catch {
+    // ignore — log mishaps must never affect requests
+  }
+}
+
+export function sanitizeError(err: unknown): string {
+  // Pattern set lives in src/redact.ts so OAuth call sites can run the
+  // same redaction directly on response-body strings without importing
+  // proxy (which imports oauth — would circle).
+  return redactSecrets(err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * API-key auth via DARIO_API_KEY (x-api-key or Authorization: Bearer).
+ * If unset, requests are allowed (loopback-only default). Exported for tests.
+ */
+export function authenticateRequest(
+  headers: IncomingMessage['headers'],
+  apiKeyBuf: Buffer | null,
+): boolean {
+  if (!apiKeyBuf) return true;
+  const provided = (headers['x-api-key'] as string)
+    || (headers.authorization as string)?.replace(/^Bearer\s+/i, '');
+  if (provided) {
+    const providedBuf = Buffer.from(provided);
+    if (providedBuf.length === apiKeyBuf.length && timingSafeEqual(providedBuf, apiKeyBuf)) return true;
+  }
+  return false;
+}
+
+/**
+ * Describe WHY authenticateRequest rejected, for operator-facing logs only.
+ * Header names only — never the value, since a mistyped key could be the
+ * user's real credential for some other provider. Pure over inputs (dario#97).
+ */
+export function describeAuthReject(
+  headers: IncomingMessage['headers'],
+): string {
+  const seenKeyHeader = headers['x-api-key'] !== undefined;
+  const seenAuthHeader = headers['authorization'] !== undefined;
+  if (!seenKeyHeader && !seenAuthHeader) return 'no x-api-key or Authorization header';
+  if (seenKeyHeader && !seenAuthHeader) return 'x-api-key present but value mismatch';
+  if (!seenKeyHeader && seenAuthHeader) return 'Authorization present but value mismatch';
+  return 'both headers present but neither value matches';
+}
+
+/**
+ * Enrich Anthropic's unhelpful 429 "Error" body with rate limit details from headers.
+ */
+function enrich429(body: string, headers: Headers): string {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const err = parsed.error as Record<string, unknown> | undefined;
+    if (err && (err.message === 'Error' || !err.message)) {
+      const claim = headers.get('anthropic-ratelimit-unified-representative-claim') || 'unknown';
+      const status = headers.get('anthropic-ratelimit-unified-status') || 'rejected';
+      const util5h = headers.get('anthropic-ratelimit-unified-5h-utilization');
+      const util7d = headers.get('anthropic-ratelimit-unified-7d-utilization');
+      const reset = headers.get('anthropic-ratelimit-unified-reset');
+      const parts = [`Rate limited (${status}). Limiting window: ${claim}`];
+      if (util5h) parts.push(`5h utilization: ${Math.round(parseFloat(util5h) * 100)}%`);
+      if (util7d) parts.push(`7d utilization: ${Math.round(parseFloat(util7d) * 100)}%`);
+      if (reset) {
+        const resetDate = new Date(parseInt(reset) * 1000);
+        const mins = Math.max(0, Math.round((resetDate.getTime() - Date.now()) / 60000));
+        parts.push(`resets in ${mins}m`);
+      }
+      err.message = parts.join('. ');
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
+}
+
+
+export async function startProxy(opts: ProxyOptions = {}): Promise<void> {
+  const port = opts.port ?? DEFAULT_PORT;
+  const host = opts.host ?? process.env.DARIO_HOST ?? DEFAULT_HOST;
+  const verbose = opts.verbose ?? false;
+  const passthrough = opts.passthrough ?? false;
+
+  // TLS-fingerprint axis (v3.23, direction #3). Proxy mode terminates TLS
+  // to api.anthropic.com from this process; if we're not on Bun, the
+  // ClientHello that reaches Anthropic is Node's OpenSSL shape, not CC's
+  // Bun/BoringSSL shape. `--strict-tls` turns this silent divergence into
+  // a startup refusal. Doctor + the always-on banner below surface the
+  // same information without aborting, for users who know they're fine
+  // (API-key billing, single-call invocations, shim-mode-elsewhere, etc.).
+  const { detectRuntimeFingerprint } = await import('./runtime-fingerprint.js');
+  const runtimeFp = detectRuntimeFingerprint();
+  if (opts.strictTls && runtimeFp.status !== 'bun-match') {
+    console.error(`[dario] --strict-tls: ${runtimeFp.detail}`);
+    if (runtimeFp.hint) console.error(`[dario]   → ${runtimeFp.hint}`);
+    console.error('[dario] refusing to start proxy mode. Omit --strict-tls to run anyway.');
+    process.exit(1);
+  }
+  // Text-tool-protocol client families that have already logged a
+  // "detected → auto-enabling preserve-tools" banner this session.
+  // Set once on first sighting per family so the startup log stays
+  // short even under heavy traffic. dario#40.
+  const detectedClientsLogged = new Set<string>();
+  // Per-(client, mapping-mode) keys for which we've already emitted a
+  // tool-substitution warn line. Same de-dup contract as
+  // detectedClientsLogged so mixed-traffic proxies don't spam.
+  const toolSubLogged = new Set<string>();
+  // Body-dump mode: set via --verbose=2 / -vv or DARIO_LOG_BODIES=1.
+  // When on, every request emits a redacted JSON body to stderr so
+  // operators can see exactly what dario forwards upstream. Default
+  // -v stays quiet because bodies can carry file content and tool
+  // output. Reported in dario#40 by @ringge.
+  const verboseBodies = Boolean(opts.verboseBodies) || process.env.DARIO_LOG_BODIES === '1';
+
+  // Operator-declared beta passthrough set. Sourced from CLI flag or env;
+  // both are CSV strings of beta-flag names. Trimmed, deduped, empty
+  // entries dropped. Stays a Set for fast membership checks in the per-
+  // request beta build below.
+  const passthroughBetas = new Set<string>(
+    [
+      ...(opts.passthroughBetas ?? []),
+      ...((process.env.DARIO_PASSTHROUGH_BETAS ?? '').split(',')),
+    ]
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0),
+  );
+  if (passthroughBetas.size > 0) {
+    console.log(`  Beta passthrough: ${[...passthroughBetas].sort().join(', ')} (always forwarded; per-account rejection cache still applies)`);
+  }
+
+  // CC body fields to suppress. Allowed values: thinking, context_management,
+  // output_config. Anything else is silently ignored after a warn (so a typo
+  // doesn't quietly disable nothing). See ProxyOptions.skipFields.
+  const ALLOWED_SKIP_FIELDS = new Set(['thinking', 'context_management', 'output_config']);
+  const skipFields = new Set<string>();
+  for (const raw of [
+    ...(opts.skipFields ?? []),
+    ...((process.env.DARIO_SKIP_FIELDS ?? '').split(',')),
+  ]) {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    if (!ALLOWED_SKIP_FIELDS.has(trimmed)) {
+      console.warn(`[dario] WARNING: --skip-fields value ${JSON.stringify(trimmed)} is not recognized; ignoring. Allowed: ${[...ALLOWED_SKIP_FIELDS].join(', ')}.`);
+      continue;
+    }
+    skipFields.add(trimmed);
+  }
+  if (skipFields.size > 0) {
+    console.log(`  Skip CC body fields: ${[...skipFields].sort().join(', ')} (omitted from outbound non-haiku requests; headers and metadata unchanged)`);
+  }
+
+  // Tool-routing mode mutex. preserve / hybrid / merge each shape the
+  // outbound `tools` array differently; combining two would mean two
+  // different bodies. Refuse to start with a clear error rather than
+  // silently dropping a flag.
+  const toolModes = [
+    opts.preserveTools ? 'preserve-tools' : null,
+    opts.hybridTools ? 'hybrid-tools' : null,
+    opts.mergeTools ? 'merge-tools' : null,
+  ].filter((m): m is string => m !== null);
+  if (toolModes.length > 1) {
+    console.error(`[dario] tool-routing flags are mutually exclusive — pick one: ${toolModes.join(', ')}.`);
+    process.exit(1);
+  }
+  if (opts.mergeTools) {
+    // Loud notice — this mode is experimental and operators need to
+    // verify their billing classification before relying on it. The
+    // wire-shape "tools[]" axis still has CC's array as a prefix, but
+    // the suffix is operator-supplied custom shapes. Anthropic's
+    // classifier may flip routing on the difference.
+    console.log('  Tool routing: merge (CC tools + client custom tools, deduped)');
+    console.log('  ⚠  EXPERIMENTAL: validate billing-bucket behavior on the first 1-2 requests with --verbose');
+  }
+
+  // Append-only structured request log. One JSON-ND line per completed
+  // request — secrets scrubbed via redactSecrets, no bodies. Off by
+  // default; opt in with `--log-file <path>` or DARIO_LOG_FILE. See the
+  // ProxyLogEntry interface for fields. Useful for backgrounded proxies
+  // where stdout is unobserved (`verbose` only helps in foreground).
+  // Errors during open are reported once and downgrade to no-op so a
+  // log mishap never blocks the proxy from booting.
+  const logFilePath = opts.logFile || process.env.DARIO_LOG_FILE || null;
+  let logFileStream: WriteStream | null = null;
+  if (logFilePath) {
+    try {
+      logFileStream = createWriteStream(logFilePath, { flags: 'a' });
+      logFileStream.on('error', (err) => {
+        console.error(`[dario] log-file write error: ${err.message} (logging disabled)`);
+        logFileStream = null;
+      });
+      console.log(`  Request log: ${logFilePath}`);
+    } catch (err) {
+      console.error(`[dario] log-file open failed: ${err instanceof Error ? err.message : err} (continuing without)`);
+      logFileStream = null;
+    }
+  }
+
+  // Multi-provider backends (v3.6.0+). Loaded once at startup; the CLI
+  // `dario backend add openai --key=…` writes to ~/.dario/backends/.
+  // Routing: a GPT-family model arriving on /v1/chat/completions is
+  // dispatched to the openai-compat backend when one is configured,
+  // otherwise it falls through to the existing Claude-side handling
+  // (which used to map gpt-* names to Claude equivalents).
+  let openaiBackend: BackendCredentials | null = await getOpenAIBackend();
+  if (openaiBackend) {
+    console.log(`  OpenAI-compat backend: ${openaiBackend.name} → ${openaiBackend.baseUrl}`);
+  }
+
+  // Multi-account pool — activated when ~/.dario/accounts/ has 2+ entries.
+  // Single-account dario keeps its existing code path unchanged.
+  //
+  // Before loading the pool, check whether the back-filled `login` snapshot
+  // has gone stale relative to credentials.json (dario#235). The single-
+  // account path keeps refreshing credentials.json independently; each
+  // refresh invalidates the snapshot's tokens server-side. Re-syncing at
+  // startup ensures the pool sees the current canonical tokens.
+  const resyncResult = await resyncLoginFromCredentialsIfStale();
+  if (resyncResult === 'resynced') {
+    console.log('[dario] re-synced pool `login` account from current credentials.json (was stale; dario#235)');
+  }
+
+  const accountsList = await loadAllAccounts();
+  const pool = accountsList.length >= 2 ? new AccountPool() : null;
+  // Per-model rate-limit bucket families seen during this proxy run. First-
+  // sight is logged once when verbose so a new Anthropic bucket (e.g. an
+  // eventual `7d_opus`) doesn't slip past unnoticed. Pure observability —
+  // routing already handles unknown families generically.
+  const seenPerModelBuckets = new Set<string>();
+  // v4 promotion: analytics is always-on so the TUI's Analytics + Hits
+  // tabs work in both pool and single-account mode. Pre-v4 this was
+  // `pool ? new Analytics() : null` — that gated the /analytics
+  // endpoint, but burn-rate / per-request visibility is useful for
+  // single-account users too.
+  const analytics = new Analytics();
+
+  // Overage-guard (v4.1, dario#288). Resolved from opts with built-in
+  // defaults (enabled=true, behavior='halt', cooldown=30min, notifyOs=true)
+  // so an opts-less proxy still gets protection. The notifier is wired
+  // separately below once notify.ts is loaded.
+  const overageGuard = new OverageGuard({
+    enabled: opts.overageGuardEnabled ?? true,
+    behavior: opts.overageGuardBehavior ?? 'halt',
+    cooldownMs: opts.overageGuardCooldownMs ?? 30 * 60 * 1000,
+    notifyOs: opts.overageGuardNotifyOs ?? true,
+    notifier: osNotify,
+  });
+  overageGuard.attach(analytics);
+  // Surface halt + resume to the foreground startup banner so an
+  // operator running `dario proxy` directly sees the event even without
+  // a TUI attached. -v / --verbose is not required — this is loud by
+  // design.
+  overageGuard.on('halt', (state: HaltState) => {
+    console.error(`[dario] OVERAGE-GUARD HALTED: ${state.request.model} on account=${state.request.account} returned representative-claim=overage at ${new Date(state.request.timestamp).toISOString()}. Returning 503 to new requests until \`dario resume\` or cooldown expires (${new Date(state.cooldownUntil).toISOString()}). See dario#288.`);
+  });
+  overageGuard.on('warn', (state: HaltState) => {
+    console.error(`[dario] OVERAGE-GUARD WARN: ${state.request.model} on account=${state.request.account} returned representative-claim=overage at ${new Date(state.request.timestamp).toISOString()}. Behavior=warn — proxy continuing to forward; investigate before bill bleeds. See dario#288.`);
+  });
+  overageGuard.on('resume', (info: { reason: 'manual' | 'cooldown' }) => {
+    console.error(`[dario] overage-guard resumed (${info.reason}). Normal request handling restored.`);
+  });
+
+  let status: Awaited<ReturnType<typeof getStatus>>;
+  if (pool) {
+    for (const acc of accountsList) {
+      pool.add(acc.alias, {
+        accessToken: acc.accessToken,
+        refreshToken: acc.refreshToken,
+        expiresAt: acc.expiresAt,
+        deviceId: acc.deviceId,
+        accountUuid: acc.accountUuid,
+        proxy: acc.proxy,
+      });
+    }
+    // Per-account egress proxy needs Bun's fetch `proxy` option — Node's
+    // built-in fetch ignores it silently. Warn loudly (don't hard-fail; other
+    // accounts may be proxy-less) so a misconfigured Node run is obvious.
+    const proxied = accountsList.filter((a) => classifyProxy(a.proxy) !== 'none');
+    if (proxied.length > 0 && !isBunRuntime()) {
+      console.warn(
+        `[dario] WARNING: ${proxied.length} account(s) have a per-account proxy ` +
+        `(${proxied.map((a) => a.alias).join(', ')}) but dario is not running under Bun. ` +
+        `Node's fetch ignores the proxy option — their traffic would egress DIRECTLY. ` +
+        `Run under Bun (dario auto-relaunches when Bun is on PATH).`,
+      );
+    }
+    // Background refresh — keep every account's token fresh without blocking requests
+    const refreshInterval = setInterval(async () => {
+      for (const acc of pool.all()) {
+        if (acc.expiresAt < Date.now() + 45 * 60 * 1000) {
+          try {
+            const saved = await loadAccount(acc.alias);
+            if (!saved) continue;
+            const refreshed = await refreshAccountToken(saved);
+            pool.updateTokens(acc.alias, refreshed.accessToken, refreshed.refreshToken, refreshed.expiresAt);
+          } catch (err) {
+            console.error(`[dario] Background refresh failed for ${acc.alias}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+      }
+    }, 15 * 60 * 1000);
+    refreshInterval.unref();
+    // Pool mode doesn't check single-account status — compute a placeholder
+    // for the startup banner using the pool's earliest expiry.
+    const earliest = Math.min(...pool.all().map(a => a.expiresAt));
+    const msLeft = Math.max(0, earliest - Date.now());
+    status = {
+      authenticated: true,
+      status: 'healthy',
+      expiresAt: earliest,
+      expiresIn: `${Math.floor(msLeft / 3600000)}h ${Math.floor((msLeft % 3600000) / 60000)}m`,
+    };
+  } else {
+    // Single-account mode — existing auth check
+    status = await getStatus();
+    if (!status.authenticated) {
+      console.error('[dario] Not authenticated. Run `dario login` first.');
+      process.exit(1);
+    }
+  }
+
+  const cliVersion = detectCliVersion();
+  // Parse --model once at startup. Supports `<provider>:<model>` to force
+  // a backend for every request (e.g. `--model=openai:gpt-4o`). Back-compat:
+  // bare names like `opus` resolve via MODEL_ALIASES.
+  const modelPrefix = opts.model ? parseProviderPrefix(opts.model) : null;
+  const cliModelRaw = modelPrefix ? modelPrefix.model : opts.model;
+  const cliProviderOverride: 'openai' | 'claude' | null = modelPrefix ? modelPrefix.provider : null;
+  const modelOverride = cliModelRaw ? (MODEL_ALIASES[cliModelRaw] ?? cliModelRaw) : null;
+  const identity = loadClaudeIdentity();
+  if (identity.deviceId) {
+    console.log('  Device identity: detected');
+  } else {
+    console.warn('[dario] WARNING: No Claude Code device identity found. Requests may be billed as Extra Usage.');
+    console.warn('[dario] Run Claude Code at least once to generate ~/.claude/.claude.json');
+  }
+
+  // Pre-build static headers — matches the set a real Claude Code client sends.
+  const staticHeaders: Record<string, string> = passthrough ? {
+    'accept': 'application/json',
+    'Content-Type': 'application/json',
+  } : {
+    'accept': 'application/json',
+    'Content-Type': 'application/json',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'user-agent': `claude-cli/${cliVersion} (external, cli)`,
+    'x-app': 'cli',
+    'x-stainless-arch': arch,
+    'x-stainless-lang': 'js',
+    'x-stainless-os': OS_NAME,
+    'x-stainless-package-version': '0.81.0',
+    'x-stainless-retry-count': '0',
+    'x-stainless-runtime': 'node',
+    // Claude Code runs on Bun which reports v24.3.0 as Node compat version
+    'x-stainless-runtime-version': 'v24.3.0',
+  };
+  // Overlay captured header values from the live template (schema v2). This
+  // replaces the hardcoded stainless/user-agent constants with whatever CC
+  // actually emitted on the capture, so a CC release that nudges any of those
+  // values gets reflected automatically on the next template refresh.
+  // Excludes auth + body-framing + session-scoped keys by construction (see
+  // extractStaticHeaderValues in live-fingerprint.ts). No-op when the loaded
+  // template predates v2 or the bundled snapshot is in use.
+  //
+  // `x-api-key` is filtered defensively here too — pre-v3.19.2 captures still
+  // carry `x-api-key: sk-dario-fingerprint-capture` from the MITM spawn env.
+  // Replaying that placeholder alongside a real OAuth Bearer triggers a
+  // "invalid x-api-key" 401 on some account tiers as of 2026-04-17 (dario#42).
+  // The capture filter was updated in v3.19.2 to stop storing it, but the
+  // per-request skip below lets existing caches self-heal without a refresh.
+  if (!passthrough && CC_TEMPLATE.header_values) {
+    for (const [k, v] of Object.entries(CC_TEMPLATE.header_values)) {
+      if (k.toLowerCase() === 'x-api-key') continue;
+      staticHeaders[k] = v;
+    }
+  }
+  let requestCount = 0;
+  const queue = new RequestQueue({
+    maxConcurrent: opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT,
+    maxQueued: opts.maxQueued ?? DEFAULT_MAX_QUEUED,
+    queueTimeoutMs: opts.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS,
+  });
+
+  // Cache context-1m beta availability. Set false once per account (or process
+  // in single-account mode) after the first "long context" rejection, so we
+  // skip sending context-1m on every subsequent request instead of paying the
+  // round-trip + retry cost each time. Keyed by account alias; `__default__`
+  // is the single-account slot. Reported by @boeingchoco in dario#36 — the
+  // retry loop was firing on every POST with hybrid-tools + OC.
+  const context1mUnavailable = new Set<string>();
+  // Per-account cache of anthropic-beta flags the upstream has rejected as
+  // "Unexpected value(s)". The live-captured template lifts whatever CC emits
+  // verbatim — including flags gated to higher-tier accounts (e.g.
+  // `afk-mode-2026-01-31` is rejected on Max 5x as of 2026-04-17). On the
+  // first rejection we parse the flag out of the error message, strip it,
+  // retry once, and cache it so subsequent requests on the same account don't
+  // re-pay the 400 round-trip. Keyed by account alias (pool) or `__default__`.
+  const unavailableBetas = new Map<string, Set<string>>();
+  const ACCOUNT_KEY_SINGLE = '__default__';
+
+  // Beta flag set — sourced from the live template when the capture recorded
+  // one (schema v2+), else falls back to the v2.1.104 bundled default. Same
+  // fallback string shim/runtime.cjs uses (kept in sync so proxy and shim
+  // never diverge on the wire). Computed once per proxy because it's a
+  // function of the loaded template, not of the request.
+  const BETA_FALLBACK = 'claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,effort-2025-11-24';
+  let betaBase = CC_TEMPLATE.anthropic_beta || BETA_FALLBACK;
+  // `oauth-2025-04-20` is CC's OAuth-enablement beta flag. It is NOT present in
+  // the live-captured beta set because dario's fingerprint capture spawns CC
+  // with a placeholder `ANTHROPIC_API_KEY`, and CC only appends the oauth beta
+  // when it's actually using an OAuth bearer token. The proxy always uses
+  // OAuth upstream, so the flag is required — force it in if the captured
+  // template didn't carry it. As of 2026-04-17 some account tiers (Max 20x,
+  // Pro) return `authentication_error: invalid x-api-key` without this flag
+  // even when a valid Bearer is sent (dario#42).
+  if (!passthrough && !betaBase.split(',').includes('oauth-2025-04-20')) {
+    betaBase = betaBase ? `${betaBase},oauth-2025-04-20` : 'oauth-2025-04-20';
+  }
+  const betaWithoutContext1m = betaBase.split(',').filter((t) => t !== 'context-1m-2025-08-07').join(',');
+
+  // Rate governor — floor + optional jitter between requests. A hardcoded
+  // 500ms floor keeps the default behavior identical to v3.23; `--pace-min`
+  // and `--pace-jitter` let callers tune the distribution. Pure calc lives
+  // in src/pacing.ts so the edge cases are unit-tested without timers.
+  const {
+    computePacingDelay,
+    resolvePacingConfig,
+    computeThinkTimeDelay,
+    resolveThinkTimeConfig,
+    computeSessionStartDelay,
+    resolveSessionStartConfig,
+  } = await import('./pacing.js');
+  let lastRequestTime = 0;
+  // Behavioral smoothing state: when the last response *completed* and
+  // how many output tokens it had. Used by computeThinkTimeDelay to
+  // model human read-time before the next request. Distinct from
+  // lastRequestTime (which tracks when the last request *started* and
+  // feeds the inter-request floor).
+  let lastResponseTime = 0;
+  let lastResponseTokens = 0;
+  // --stealth toggles the behavioral-stealth preset across all three
+  // pacing layers (pace, think-time, session-start). When on, each
+  // resolver's zero-default flips to its stealth preset; explicit flags
+  // and env vars still win.
+  const stealth = Boolean(opts.stealth);
+  const pacingCfg = resolvePacingConfig({
+    minGapMs: opts.pacingMinMs,
+    jitterMs: opts.pacingJitterMs,
+    stealth,
+  });
+  const thinkTimeCfg = resolveThinkTimeConfig({
+    baseMs: opts.thinkTimeBaseMs,
+    perTokenMs: opts.thinkTimePerTokenMs,
+    jitterMs: opts.thinkTimeJitterMs,
+    maxMs: opts.thinkTimeMaxMs,
+    stealth,
+  });
+  const sessionStartCfg = resolveSessionStartConfig({
+    minMs: opts.sessionStartMinMs,
+    jitterMs: opts.sessionStartJitterMs,
+    stealth,
+  });
+  const thinkTimeEnabled = thinkTimeCfg.baseMs > 0 || thinkTimeCfg.perTokenMs > 0 || thinkTimeCfg.jitterMs > 0;
+  const sessionStartEnabled = sessionStartCfg.minMs > 0 || sessionStartCfg.jitterMs > 0;
+  if (verbose) {
+    if (stealth) console.log('[dario] stealth: behavioral-stealth preset active (pace+think+session-start defaults non-zero)');
+    console.log(`[dario] pacing: min=${pacingCfg.minGapMs}ms jitter=${pacingCfg.jitterMs}ms`);
+    if (thinkTimeEnabled) {
+      console.log(`[dario] think-time: base=${thinkTimeCfg.baseMs}ms perToken=${thinkTimeCfg.perTokenMs}ms jitter=${thinkTimeCfg.jitterMs}ms max=${thinkTimeCfg.maxMs}ms`);
+    }
+    if (sessionStartEnabled) {
+      console.log(`[dario] session-start: min=${sessionStartCfg.minMs}ms jitter=${sessionStartCfg.jitterMs}ms`);
+    }
+  }
+
+  // Stream-consumption replay (v3.25, direction #5). When on, a client
+  // disconnect no longer aborts the upstream fetch — we keep consuming
+  // the SSE so Anthropic sees a CC-shaped read-to-EOF pattern. See
+  // src/stream-drain.ts for the rationale + tradeoff.
+  const { decideOnClientClose, resolveDrainOnClose } = await import('./stream-drain.js');
+  const drainOnClose = resolveDrainOnClose(opts.drainOnClose);
+  if (verbose) {
+    console.log(`[dario] drain-on-close: ${drainOnClose ? 'enabled' : 'disabled'}`);
+  }
+
+  // Session-ID lifecycle (v3.28, direction #1). Replaces the v3.27 hardcoded
+  // 15-minute idle window with a tunable registry: idle threshold, jitter on
+  // that threshold, optional hard max-age, and optional per-client keying.
+  // Defaults preserve v3.27 behavior exactly. See src/session-rotation.ts.
+  const { SessionRegistry, resolveSessionRotationConfig } = await import('./session-rotation.js');
+  const sessionCfg = resolveSessionRotationConfig({
+    idleRotateMs: opts.sessionIdleRotateMs,
+    jitterMs: opts.sessionRotateJitterMs,
+    maxAgeMs: opts.sessionMaxAgeMs,
+    perClient: opts.sessionPerClient,
+  });
+  const sessionRegistry = new SessionRegistry(sessionCfg, () => randomUUID());
+  if (verbose) {
+    const maxAge = sessionCfg.maxAgeMs !== undefined ? `${sessionCfg.maxAgeMs}ms` : 'off';
+    console.log(`[dario] session: idle=${sessionCfg.idleRotateMs}ms jitter=${sessionCfg.jitterMs}ms maxAge=${maxAge} perClient=${sessionCfg.perClient}`);
+  }
+
+  // Optional proxy authentication — pre-encode key buffer for performance
+  const apiKey = process.env.DARIO_API_KEY;
+  const apiKeyBuf = apiKey ? Buffer.from(apiKey) : null;
+  // CORS origin defaults to the localhost URL the proxy is served at. Users
+  // binding to a non-loopback address (e.g. a Tailscale interface) can
+  // override via DARIO_CORS_ORIGIN — otherwise browser-based clients hitting
+  // dario over the mesh will be blocked by their browser's CORS check.
+  const corsOrigin = process.env.DARIO_CORS_ORIGIN || `http://localhost:${port}`;
+
+  // Security headers for all responses
+  const SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Cache-Control': 'no-store',
+  };
+
+  // Pre-serialize static responses
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    // *-wildcard covers custom headers in non-credentialed mode, except
+    // Authorization, which is a CORS non-wildcard request-header name.
+    'Access-Control-Allow-Headers': '*, Authorization',
+    'Access-Control-Max-Age': '86400',
+    ...SECURITY_HEADERS,
+  };
+  const JSON_HEADERS = { 'Content-Type': 'application/json', ...SECURITY_HEADERS };
+  const MODELS_JSON = JSON.stringify(OPENAI_MODELS_LIST);
+  const ERR_UNAUTH = JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing API key' });
+  const ERR_FORBIDDEN = JSON.stringify({ error: 'Forbidden', message: 'Path not allowed. Supported paths: POST /v1/messages, POST /v1/chat/completions, GET /v1/models' });
+  const ERR_METHOD = JSON.stringify({ error: 'Method not allowed' });
+
+  function checkAuth(req: IncomingMessage): boolean {
+    return authenticateRequest(req.headers, apiKeyBuf);
+  }
+
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); res.end(); return; }
+
+    // Strip query parameters for endpoint matching
+    const urlPath = req.url?.split('?')[0] ?? '';
+
+    // Health check
+    //
+    // Returns HTTP 503 when OAuth is in a state that will cause every upstream
+    // call to fail: refresh has failed N consecutive times ('broken'), or the
+    // access token is expired with no usable refresh path. Docker healthchecks
+    // and dependent services (`depends_on: service_healthy`) need this to
+    // react instead of cheerfully passing while every /v1/messages 401s.
+    if (urlPath === '/health' || urlPath === '/') {
+      const s = await getStatus();
+      const dead = s.status === 'broken' || s.status === 'none' ||
+                   (s.status === 'expired' && s.canRefresh === false);
+      const httpStatus = dead ? 503 : 200;
+      res.writeHead(httpStatus, JSON_HEADERS);
+      res.end(JSON.stringify({
+        status: dead ? 'degraded' : 'ok',
+        oauth: s.status,
+        expiresIn: s.expiresIn,
+        requests: requestCount,
+        ...(s.refreshFailures ? { refreshFailures: s.refreshFailures } : {}),
+        ...(s.lastRefreshError ? { lastRefreshError: s.lastRefreshError } : {}),
+      }));
+      return;
+    }
+
+    if (!checkAuth(req)) {
+      if (verbose) {
+        // Silent auth rejects are hard to diagnose when a client's config
+        // doesn't quite match what dario expects (dario#97). Emit a
+        // one-line reject log under -v so operators see auth misfires.
+        console.error(`[dario] #${requestCount} 401 rejected (DARIO_API_KEY mismatch): ${describeAuthReject(req.headers)}`);
+      }
+      writeLogLine(logFileStream, {
+        ts: new Date().toISOString(), req: requestCount,
+        method: req.method ?? '', path: urlPath, status: 401, reject: 'auth',
+      });
+      res.writeHead(401, JSON_HEADERS);
+      res.end(ERR_UNAUTH);
+      return;
+    }
+
+    // Status endpoint
+    if (urlPath === '/status') {
+      const s = await getStatus();
+      res.writeHead(200, JSON_HEADERS);
+      res.end(JSON.stringify(s));
+      return;
+    }
+
+    // Pool status endpoint — shows loaded accounts, headroom, and the
+    // account that would be selected next. Read-only; mutation flows through
+    // the `dario accounts` CLI, not HTTP.
+    if (urlPath === '/accounts' && req.method === 'GET') {
+      if (!pool) {
+        res.writeHead(200, JSON_HEADERS);
+        res.end(JSON.stringify({ mode: 'single-account', accounts: 0 }));
+        return;
+      }
+      const now = Date.now();
+      const accounts = pool.all().map(a => {
+        const inCooldown = isInAuthCooldown(a, now);
+        const cooldownMs = inCooldown && a.lastAuthFailureAt
+          ? Math.max(0, authCooldownMs(a.consecutiveAuthFailures) - (now - a.lastAuthFailureAt))
+          : 0;
+        return {
+          alias: a.alias,
+          util5h: a.rateLimit.util5h,
+          util7d: a.rateLimit.util7d,
+          claim: a.rateLimit.claim,
+          status: inCooldown ? 'auth-cooldown' : a.rateLimit.status,
+          requestCount: a.requestCount,
+          expiresInMs: Math.max(0, a.expiresAt - now),
+          ...(inCooldown
+            ? {
+                lastAuthFailureAt: a.lastAuthFailureAt,
+                consecutiveAuthFailures: a.consecutiveAuthFailures,
+                cooldownMs,
+              }
+            : {}),
+        };
+      });
+      res.writeHead(200, JSON_HEADERS);
+      res.end(JSON.stringify({
+        mode: 'pool',
+        ...pool.status(),
+        stickyBindings: pool.stickyCount(),
+        accounts,
+      }));
+      return;
+    }
+
+    // Analytics endpoint — rolling-window summary + burn-rate snapshot.
+    // Always-on as of v4 (pre-v4 this was gated to pool mode).
+    if (urlPath === '/analytics' && req.method === 'GET') {
+      res.writeHead(200, JSON_HEADERS);
+      res.end(JSON.stringify(analytics.summary()));
+      return;
+    }
+
+    // Analytics live stream — SSE of new RequestRecord JSON, one event
+    // per record as it lands. Drives the v4 TUI's Hits tab. Sends a
+    // backlog of the most-recent 50 records on connect so a freshly-
+    // attached subscriber sees state immediately, then live-tails.
+    //
+    // Auth: same as /analytics — no auth in single-account default mode;
+    // the proxy listens on loopback by default. DARIO_API_KEY users
+    // get rejected by the earlier auth gate up the handler chain.
+    //
+    // Disconnect handling: the 'close' event on `req` removes our
+    // listener from the Analytics EventEmitter so we don't leak.
+    if (urlPath === '/analytics/stream' && req.method === 'GET') {
+      // SECURITY_HEADERS sets Cache-Control: no-store; SSE wants
+      // no-cache, no-transform. Spread SECURITY_HEADERS first then
+      // override the cache directive — order matters since spread
+      // overlap is last-wins in JS.
+      const sseHeaders: Record<string, string> = {
+        ...SECURITY_HEADERS,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',  // disable any proxy buffering
+        'Access-Control-Allow-Origin': corsOrigin,
+      };
+      res.writeHead(200, sseHeaders);
+      // Backlog: replay recent records so a TUI attaching mid-session
+      // sees something. 50 is a soft default; lots of room to send more
+      // since this is one-time on connect.
+      for (const past of analytics.recent(50)) {
+        res.write(`data: ${JSON.stringify(past)}\n\n`);
+      }
+      // Backlog the current halt state if any — a TUI attaching mid-halt
+      // needs to see the banner immediately without waiting for the
+      // next overage hit (which won't come, because the proxy is halted).
+      const haltedNow = overageGuard.state();
+      if (haltedNow) {
+        res.write(`event: overage_halt\ndata: ${JSON.stringify(haltedNow)}\n\n`);
+      }
+      // Live tail — request records on default 'message' event, halt /
+      // warn / resume on named events so the TUI can route on event type
+      // without changing the existing record shape.
+      const onRecord = (r: RequestRecord) => {
+        // Use try/catch so a broken socket (peer hung up between events)
+        // doesn't crash the request hot-path — Analytics already wraps
+        // its emit in try/catch but the .write itself can also throw.
+        try { res.write(`data: ${JSON.stringify(r)}\n\n`); } catch { /* ignored */ }
+      };
+      const onHalt = (state: HaltState) => {
+        try { res.write(`event: overage_halt\ndata: ${JSON.stringify(state)}\n\n`); } catch { /* ignored */ }
+      };
+      const onWarn = (state: HaltState) => {
+        try { res.write(`event: overage_warn\ndata: ${JSON.stringify(state)}\n\n`); } catch { /* ignored */ }
+      };
+      const onResume = (info: { reason: string; previousSince: number }) => {
+        try { res.write(`event: overage_resume\ndata: ${JSON.stringify(info)}\n\n`); } catch { /* ignored */ }
+      };
+      analytics.on('record', onRecord);
+      overageGuard.on('halt', onHalt);
+      overageGuard.on('warn', onWarn);
+      overageGuard.on('resume', onResume);
+      // Heartbeat every 25s — SSE comments are ignored by clients but
+      // keep middle-boxes (CDNs, dev-proxies) from closing the pipe.
+      const heartbeat = setInterval(() => {
+        try { res.write(`: heartbeat ${Date.now()}\n\n`); } catch { /* ignored */ }
+      }, 25_000);
+      heartbeat.unref?.();
+      req.on('close', () => {
+        analytics.off('record', onRecord);
+        overageGuard.off('halt', onHalt);
+        overageGuard.off('warn', onWarn);
+        overageGuard.off('resume', onResume);
+        clearInterval(heartbeat);
+      });
+      return;
+    }
+
+    // POST /admin/resume — clear overage-guard halt state (v4.1, dario#288).
+    // Idempotent: returns 200 with `wasHalted: false` if the proxy is
+    // already running normally. Auth gating is the same as every other
+    // endpoint (loopback-bind by default; DARIO_API_KEY needed for
+    // non-loopback). GET returns the current state for read-only queries.
+    if (urlPath === '/admin/resume' && req.method === 'GET') {
+      const state = overageGuard.state();
+      res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+      res.end(JSON.stringify({
+        halted: state !== null,
+        state,
+        config: overageGuard.config(),
+      }));
+      return;
+    }
+    if (urlPath === '/admin/resume' && req.method === 'POST') {
+      const wasHalted = overageGuard.state() !== null;
+      overageGuard.clear('manual');
+      res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+      res.end(JSON.stringify({
+        ok: true,
+        wasHalted,
+        resumedAt: new Date().toISOString(),
+      }));
+      return;
+    }
+
+    if (urlPath === '/v1/models' && req.method === 'GET') { requestCount++; res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin }); res.end(MODELS_JSON); return; }
+
+    // Detect OpenAI-format requests
+    const isOpenAI = urlPath === '/v1/chat/completions';
+
+    // Allowlisted API paths — only these are proxied (prevents SSRF)
+    // ?beta=true matches native Claude Code behavior for billing classification
+    const allowedPaths: Record<string, string> = {
+      '/v1/messages': `${ANTHROPIC_API}/v1/messages?beta=true`,
+      '/v1/complete': `${ANTHROPIC_API}/v1/complete`,
+    };
+    const targetBase = isOpenAI ? `${ANTHROPIC_API}/v1/messages?beta=true` : allowedPaths[urlPath];
+    if (!targetBase) { res.writeHead(403, JSON_HEADERS); res.end(ERR_FORBIDDEN); return; }
+    if (req.method !== 'POST') { res.writeHead(405, JSON_HEADERS); res.end(ERR_METHOD); return; }
+
+    // Overage-guard halt check (v4.1, dario#288). Subscribers should never
+    // see a single `representative-claim: overage` response during normal
+    // operation; one means traffic is being reclassified to per-token
+    // billing. Block upstream forwarding with a 503 + Anthropic-shaped
+    // error body until the user runs `dario resume` or the cooldown
+    // auto-expires. Health / status / analytics / admin endpoints above
+    // bypass this check intentionally — the TUI needs them to surface
+    // the halt and the user needs /admin/resume to clear it.
+    if (overageGuard.isHalted()) {
+      requestCount++;
+      const state = overageGuard.state()!;
+      writeLogLine(logFileStream, {
+        ts: new Date().toISOString(), req: requestCount,
+        method: req.method ?? '', path: urlPath, status: 503, reject: 'overage-halt',
+      });
+      res.writeHead(503, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+      res.end(JSON.stringify(buildHaltErrorBody(state)));
+      return;
+    }
+
+    // Proxy to Anthropic (with concurrency control). The bounded queue
+    // replaces the v3.30.x-and-earlier unbounded semaphore — dario#80. A
+    // queue-full condition returns an explicit 429 with a `"queue-full"`
+    // marker in the body; a queue-timeout returns 504 with `"queue-timeout"`.
+    try {
+      await queue.acquire();
+    } catch (err) {
+      if (err instanceof QueueFullError) {
+        writeLogLine(logFileStream, {
+          ts: new Date().toISOString(), req: requestCount,
+          method: req.method ?? '', path: urlPath, status: 429, reject: 'queue-full',
+        });
+        res.writeHead(429, JSON_HEADERS);
+        res.end(JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'rate_limit_error',
+            message: `dario queue full — ${queue.maxConcurrent} concurrent + ${queue.maxQueued} queued already in flight. Tune --max-concurrent / --max-queued, or reduce client-side concurrency. (dario#80)`,
+          },
+        }));
+        return;
+      }
+      if (err instanceof QueueTimeoutError) {
+        writeLogLine(logFileStream, {
+          ts: new Date().toISOString(), req: requestCount,
+          method: req.method ?? '', path: urlPath, status: 504, reject: 'queue-timeout',
+        });
+        res.writeHead(504, JSON_HEADERS);
+        res.end(JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'timeout_error',
+            message: `dario queue timeout — request waited longer than ${queue.queueTimeoutMs}ms for a concurrency slot. Tune --queue-timeout, or reduce client-side concurrency. (dario#80)`,
+          },
+        }));
+        return;
+      }
+      throw err;
+    }
+    // Hoisted so the finally block can clean up whatever was set.
+    let upstreamTimeout: ReturnType<typeof setTimeout> | null = null;
+    let onClientClose: (() => void) | null = null;
+    type UpstreamAbortReason = 'timeout' | 'client_closed' | 'sse_overflow' | null;
+    let upstreamAbortReason = null as UpstreamAbortReason;
+    // Hoisted so the catch can include them in the request log line. The
+    // body-parsing block below assigns these once the request is parsed;
+    // before that point they remain at their initial values, which is
+    // also exactly what we want to log on early-failure paths.
+    let requestModel = '';
+    let detectedClientForLog: string | undefined;
+    let preserveToolsEffective: boolean = Boolean(opts.preserveTools);
+    try {
+      // Pool mode: select an account by headroom. Single-account mode:
+      // fall through to getAccessToken() exactly as before. Request-path
+      // 429 failover (retry with the next-best account before returning a
+      // rate-limit error to the client) lands in v3.5.1 — this release
+      // ships the pool scaffolding and headroom-aware selection across
+      // requests, not within a single 429 retry.
+      let poolAccount: PoolAccount | null = null;
+      let accessToken: string;
+      if (pool) {
+        poolAccount = pool.select();
+        if (!poolAccount) {
+          res.writeHead(503, JSON_HEADERS);
+          res.end(JSON.stringify({ error: 'No accounts available in pool' }));
+          return;
+        }
+        accessToken = poolAccount.accessToken;
+      } else {
+        accessToken = await getAccessToken();
+      }
+
+      // Read request body with size limit and timeout (prevents slow-loris)
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      const bodyTimeout = setTimeout(() => { req.destroy(); }, BODY_READ_TIMEOUT_MS);
+      try {
+        for await (const chunk of req) {
+          const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+          totalBytes += buf.length;
+          if (totalBytes > MAX_BODY_BYTES) {
+            clearTimeout(bodyTimeout);
+            res.writeHead(413, JSON_HEADERS);
+            res.end(JSON.stringify({ error: 'Request body too large', max: `${MAX_BODY_BYTES / 1024 / 1024}MB` }));
+            return;
+          }
+          chunks.push(buf);
+        }
+      } finally {
+        clearTimeout(bodyTimeout);
+      }
+      let body = Buffer.concat(chunks);
+
+      // Provider prefix (v3.10.0). If the body's model field is `<provider>:<model>`
+      // with a recognized prefix, strip the prefix and force routing regardless of
+      // regex. CLI-level `--model=<provider>:<name>` applies the same override
+      // server-wide. Rewrites the body in place once so both code paths below
+      // see the stripped model name.
+      //
+      // MODEL_ALIASES resolution (v3.36): on the claude/anthropic prefix path,
+      // resolve short names (`opus`/`sonnet`/`haiku`) to canonical Anthropic
+      // model IDs at request time. Without this, `claude:opus` would forward
+      // `model: "opus"` upstream and Anthropic 400's it. The CLI parser
+      // (--model=opus) already does this at startup; the request-time path
+      // didn't until now. Important for the Cursor BYOK workaround in
+      // dario#190 where users have to use a colon-prefix to dodge Cursor's
+      // built-in `claude-*` name collision (Cursor reroutes any name it
+      // recognizes through its own Anthropic gateway, bypassing localhost).
+      let forcedProvider: 'openai' | 'claude' | null = cliProviderOverride;
+      let requestEffort: EffortValue | undefined; // dario#419 — per-request effort parsed from a model-name suffix (model:high / model-high)
+      if (body.length > 0) {
+        try {
+          const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
+          const rawModel = (parsed.model as string | undefined) ?? '';
+          const prefix = parseProviderPrefix(rawModel);
+          if (prefix) {
+            forcedProvider = prefix.provider;
+            // dario#419 — optional effort suffix (model:high / model-high). Claude
+            // path ONLY: OpenAI backends keep their own -high/-low suffixes, so we
+            // strip it before the alias lookup only when routing to the subscription.
+            let providerModel = prefix.model;
+            if (prefix.provider === 'claude') {
+              const eff = parseEffortSuffix(providerModel);
+              if (eff.effort) { requestEffort = eff.effort; providerModel = eff.model; }
+            }
+            const resolvedModel = prefix.provider === 'claude'
+              ? resolveClaudeAlias(providerModel)
+              : providerModel;
+            parsed.model = resolvedModel;
+            body = Buffer.from(JSON.stringify(parsed));
+            if (verbose) {
+              const aliasNote = resolvedModel !== providerModel ? ` (alias: ${providerModel} → ${resolvedModel})` : '';
+              const effNote = requestEffort ? ` (effort: ${requestEffort})` : '';
+              console.log(`[dario] provider prefix: ${rawModel} → ${prefix.provider} backend with model ${resolvedModel}${aliasNote}${effNote}`);
+            }
+          } else if (cliProviderOverride === 'openai' && cliModelRaw) {
+            // --model=openai:<name> forces the openai backend and replaces
+            // the model name server-wide. Body gets rewritten so the openai
+            // route below sees the CLI-chosen model.
+            parsed.model = cliModelRaw;
+            body = Buffer.from(JSON.stringify(parsed));
+          } else if (!isOpenAIModel(rawModel) && forcedProvider !== 'openai') {
+            // dario#419 — bare Claude model name carrying an effort suffix with no
+            // provider prefix (e.g. Cursor's `claude-opus-4-8-high`). OpenAI-bound
+            // models are excluded so their own suffixes pass through untouched.
+            const eff = parseEffortSuffix(rawModel);
+            if (eff.effort) {
+              requestEffort = eff.effort;
+              parsed.model = eff.model;
+              body = Buffer.from(JSON.stringify(parsed));
+              if (verbose) console.log(`[dario] effort suffix: ${rawModel} → model ${eff.model} (effort: ${eff.effort})`);
+            }
+          }
+        } catch { /* not JSON — fall through */ }
+      }
+
+      // Multi-provider routing (v3.6.0+). When an OpenAI-compat backend is
+      // configured and the request is on /v1/chat/completions with a
+      // GPT-family model (or a forced `openai:` prefix), forward it straight
+      // through to the backend instead of running it through the Claude
+      // template path. Requests on /v1/messages or with Claude-family models
+      // fall through to existing behavior.
+      if (openaiBackend && isOpenAI && forcedProvider !== 'claude' && body.length > 0) {
+        try {
+          const peek = JSON.parse(body.toString()) as { model?: string };
+          const rawModel = (peek.model || '').toString();
+          if (rawModel && (forcedProvider === 'openai' || isOpenAIModel(rawModel))) {
+            if (verbose) {
+              console.log(`[dario] #${requestCount} ${req.method} ${urlPath} (model: ${rawModel}) → openai backend`);
+            }
+            requestCount++;
+            await forwardToOpenAI(
+              req, res, body, openaiBackend, corsOrigin, SECURITY_HEADERS,
+              UPSTREAM_TIMEOUT_MS, verbose,
+            );
+            return;
+          }
+        } catch { /* not JSON — fall through to existing path */ }
+      }
+
+      // Parse body once, apply OpenAI translation, model override, and sanitization
+      let finalBody: Buffer | undefined = body.length > 0 ? body : undefined;
+      let ccToolMap: Map<string, ToolMapping> | null = null;
+      // requestModel / detectedClientForLog / preserveToolsEffective are
+      // declared at the outer try-scope above so the catch block can
+      // include them in the request log line.
+      // Session stickiness key — hash of the first user message in this
+      // conversation. Populated inside the template-replay block below
+      // after the first user message is extracted for the build tag, then
+      // used to rebind the sticky slot on in-request 429 failover and on
+      // the eventual request bookkeeping. Null when body isn't JSON, when
+      // there's no user message, or when we're in passthrough mode (the
+      // fingerprint work doesn't run, so there's no point biasing account
+      // selection toward one we already paid cache cost on — passthrough
+      // users aren't doing template replay anyway).
+      let stickyKey: string | null = null;
+      // Outbound session id resolved once — either inside the template build
+      // (so body metadata matches) or below for passthrough (no body build).
+      let preBodySessionId: string | undefined;
+      // Request context for hybrid-mode field injection (#33). Built once
+      // per request from incoming headers so the reverse mapper can fill
+      // client-declared fields like `sessionId` that CC's schema doesn't
+      // carry. Undefined when hybridTools is off — the reverse path then
+      // skips injection entirely.
+      const reqCtx: RequestContext | undefined = opts.hybridTools ? {
+        sessionId: (req.headers['x-session-id'] as string | undefined)
+          ?? (req.headers['x-client-session-id'] as string | undefined)
+          ?? SESSION_ID,
+        requestId: (req.headers['x-request-id'] as string | undefined) ?? randomUUID(),
+        channelId: req.headers['x-channel-id'] as string | undefined,
+        userId: req.headers['x-user-id'] as string | undefined,
+        timestamp: new Date().toISOString(),
+      } : undefined;
+      if (body.length > 0) {
+        try {
+          const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
+          // Strip orchestration tags from messages (Aider, Cursor, etc.)
+          sanitizeMessages(parsed, opts.preserveOrchestrationTags);
+          const result = isOpenAI ? openaiToAnthropic(parsed, modelOverride) : (modelOverride ? { ...parsed, model: modelOverride } : parsed);
+          const r = result as Record<string, unknown>;
+          requestModel = (r.model as string || '').toLowerCase();
+          // In passthrough mode, skip all Claude-specific injection — OAuth swap only
+          if (!passthrough) {
+            // ── Template replay: replace the entire request with a CC template ──
+            // Instead of transforming signals one by one, we build a new request
+            // from CC's exact template and inject only the conversation content.
+            // The upstream sees a genuine CC request structure.
+
+            const userMsg = extractFirstUserMessage(r);
+            const buildTag = computeBuildTag(userMsg, cliVersion);
+            const cch = computeCch();
+            const fullVersion = `${cliVersion}.${buildTag}`;
+            const billingTag = `x-anthropic-billing-header: cc_version=${fullVersion}; cc_entrypoint=sdk-cli; cch=${cch};`;
+            const CACHE_EPHEMERAL = { type: 'ephemeral' as const };
+
+            // Session stickiness: rebind the pre-selected pool account to
+            // whatever the sticky-key resolver picks. If this is a new
+            // conversation the key binds to the current best account
+            // (no-op swap in most cases). If this is a follow-up turn of
+            // an existing conversation the key resolves to the account
+            // that already has the Anthropic prompt cache warmed for it.
+            // Rotating off mid-session costs cache-create on every turn.
+            stickyKey = computeStickyKey(userMsg);
+            if (pool && stickyKey) {
+              const preferred = pool.selectSticky(stickyKey, modelFamily(requestModel));
+              if (preferred && preferred.alias !== poolAccount?.alias) {
+                poolAccount = preferred;
+                accessToken = preferred.accessToken;
+                if (verbose) {
+                  console.log(`[dario] #${requestCount} sticky: bind ${stickyKey} → ${preferred.alias}`);
+                }
+              }
+            }
+
+            // Resolve the outbound session id before the body build so the
+            // metadata.session_id in the CC body and the x-claude-code-session-id
+            // header both use the same value. v3.27 consulted SESSION_ID twice
+            // with rotation between the reads, so on rotation events body and
+            // header disagreed — harmless for plain operation but a fingerprint
+            // in its own right.
+            if (poolAccount) {
+              preBodySessionId = poolAccount.identity.sessionId;
+            } else {
+              const clientKey = (req.headers['x-session-id'] as string | undefined)
+                ?? (req.headers['x-client-session-id'] as string | undefined);
+              const assigned = sessionRegistry.getOrCreate(clientKey, Date.now());
+              preBodySessionId = assigned.sessionId;
+              SESSION_ID = assigned.sessionId;
+              if (verbose && assigned.rotated && assigned.reason !== 'rotate-new') {
+                console.log(`[dario] #${requestCount} session: rotate (${assigned.reason})`);
+              }
+            }
+            const bodyIdentity = poolAccount
+              ? poolAccount.identity
+              : { deviceId: identity.deviceId, accountUuid: identity.accountUuid, sessionId: preBodySessionId };
+            const { body: ccBody, toolMap, detectedClient, unmappedTools } = buildCCRequest(
+              r, billingTag, CACHE_EPHEMERAL,
+              bodyIdentity,
+              {
+                preserveTools: opts.preserveTools ?? false,
+                hybridTools: opts.hybridTools ?? false,
+                mergeTools: opts.mergeTools ?? false,
+                noAutoDetect: opts.noAutoDetect ?? false,
+                effort: requestEffort ?? opts.effort,
+                maxTokens: opts.maxTokens,
+                systemPrompt: opts.systemPrompt,
+                skipFields,
+                honorClientThinking: opts.honorClientThinking ?? false,
+              },
+            );
+            detectedClientForLog = detectedClient;
+            preserveToolsEffective = Boolean(opts.preserveTools)
+              || (Boolean(detectedClient) && !opts.hybridTools && !opts.mergeTools);
+
+            // Log the auto-preserve-tools switch once per text-tool
+            // client family. Skip when the operator already opted into
+            // --preserve-tools or --hybrid-tools — they know what they
+            // picked and don't need a "hey, we heuristically agree"
+            // line on every new client seen. dario#40.
+            if (
+              detectedClient
+              && !opts.preserveTools
+              && !opts.hybridTools
+              && !detectedClientsLogged.has(detectedClient)
+            ) {
+              detectedClientsLogged.add(detectedClient);
+              console.log(`[dario] detected ${detectedClient}-style text-tool protocol — auto-enabling preserve-tools for this client (pass --hybrid-tools to override, --preserve-tools to silence)`);
+            }
+
+            // Surface tool substitution. When a non-CC client routes
+            // tools we don't have in TOOL_MAP and neither auto-detect
+            // nor an explicit flag flipped us into preserve-tools, the
+            // unmapped tools get distributed onto CC fallback slots —
+            // the model upstream sees "Glob"/"Read"/etc. and the
+            // client's own tool surface is silently rewritten on the
+            // response path. That rewrite is correct for
+            // schema-compatible cases but invisible to operators who
+            // didn't expect it. One-line warn the first time we see a
+            // non-empty unmapped set per (client family, mapping mode)
+            // — same de-dupe key shape as the auto-detect line so a
+            // mixed-traffic proxy doesn't spam.
+            const subKey = `${detectedClient ?? 'unknown'}:${preserveToolsEffective ? 'preserve' : 'remap'}`;
+            if (
+              unmappedTools.length > 0
+              && !preserveToolsEffective
+              && !toolSubLogged.has(subKey)
+            ) {
+              toolSubLogged.add(subKey);
+              const totalTools = (Array.isArray(r.tools) ? r.tools.length : 0);
+              const sample = unmappedTools.slice(0, 5).join(', ');
+              const more = unmappedTools.length > 5 ? `, +${unmappedTools.length - 5} more` : '';
+              console.log(`[dario] tool substitution: ${unmappedTools.length}/${totalTools} client tool${unmappedTools.length === 1 ? '' : 's'} not in TOOL_MAP — remapped onto CC fallback slots (${sample}${more}). Pass --preserve-tools to forward your schemas verbatim instead.`);
+            }
+
+            // Store tool map for response reverse-mapping
+            ccToolMap = toolMap;
+
+            // Replace request body entirely with CC template
+            for (const key of Object.keys(r)) delete r[key];
+            Object.assign(r, ccBody);
+          }
+          finalBody = Buffer.from(JSON.stringify(r));
+        } catch { /* not JSON, send as-is */ }
+      }
+
+      if (verbose) {
+        const modelInfo = modelOverride ? ` (model: ${modelOverride})` : '';
+        console.log(`[dario] #${requestCount} ${req.method} ${urlPath}${modelInfo}`);
+      }
+
+      // Body dump — -vv / DARIO_LOG_BODIES=1. Runs on the outbound
+      // body after the template build so operators see what actually
+      // lands on the wire. sanitizeError's redaction strips bearer
+      // tokens, sk-ant-* keys, and JWT triples in case any leaked
+      // into the body (e.g. user pasted a curl). 8KB cap because the
+      // CC system prompt alone is 25KB and dumping it every request
+      // buries the useful content. dario#40.
+      if (verboseBodies && finalBody) {
+        const rendered = finalBody.toString('utf8');
+        const capped = rendered.length > 8192
+          ? rendered.slice(0, 8192) + `\n[...truncated ${rendered.length - 8192} bytes]`
+          : rendered;
+        console.log(`[dario] #${requestCount} request body:\n${sanitizeError(capped)}`);
+      }
+
+      // Beta headers
+      const clientBeta = req.headers['anthropic-beta'] as string | undefined;
+      let beta: string;
+      if (passthrough) {
+        // Passthrough: only add oauth beta, forward client betas as-is
+        beta = 'oauth-2025-04-20';
+        if (clientBeta) beta += ',' + clientBeta;
+      } else {
+        // Beta set sourced from the live template (schema v2). Bundled
+        // snapshots predating v3.19 leave anthropic_beta undefined, so fall
+        // back to the v2.1.104 flag set — matches shim/runtime.cjs's fallback.
+        // context-1m requires Extra Usage — if it 400s, we auto-retry without
+        // it, and cache the rejection so subsequent requests on this account
+        // skip context-1m entirely (dario#36).
+        const acctKey = poolAccount?.alias ?? ACCOUNT_KEY_SINGLE;
+        const skipContext1m = context1mUnavailable.has(acctKey);
+        beta = skipContext1m ? betaWithoutContext1m : betaBase;
+        if (clientBeta) {
+          const baseSet = new Set(beta.split(','));
+          const filtered = filterBillableBetas(clientBeta)
+            .split(',').filter(b => b.length > 0 && !baseSet.has(b)).join(',');
+          if (filtered) beta += ',' + filtered;
+        }
+        // Operator-pinned passthrough betas. Always forwarded — bypasses
+        // the billable-beta filter, bypasses the "not in client's
+        // request" gate. The per-account rejection cache below still
+        // applies, so a pinned flag the upstream 400's gets dropped on
+        // the retry rather than re-sent forever (the cache survives the
+        // operator's pin because the upstream's no is final until a
+        // tier change resets it).
+        if (passthroughBetas.size > 0) {
+          const baseSet = new Set(beta.split(','));
+          const toAdd = [...passthroughBetas].filter((b) => !baseSet.has(b));
+          if (toAdd.length > 0) beta += ',' + toAdd.join(',');
+        }
+        // Strip any beta flags the upstream has previously rejected on this
+        // account so we don't re-pay the 400 round-trip (dario#42 afk-mode
+        // fallout: captured templates carry tier-gated flags whose availability
+        // we only learn at request time).
+        const rejectedSet = unavailableBetas.get(acctKey);
+        if (rejectedSet && rejectedSet.size > 0) {
+          beta = beta.split(',').filter((t) => t.length > 0 && !rejectedSet.has(t)).join(',');
+        }
+      }
+
+      // Rate governor — prevent inhuman request cadence. See src/pacing.ts
+      // for the pure delay calculators. Three layers, all defaults preserve
+      // v3.37.20 behaviour:
+      //   1. pacingDelay      — floor on inter-request distance (always on,
+      //                         500ms default since v3.24).
+      //   2. thinkTimeDelay   — post-response read-time, proportional to
+      //                         the previous response's output tokens.
+      //                         Opt-in via --think-time-* flags.
+      //   3. sessionStartDelay — one-shot startup latency on the first
+      //                          request of a session (lastResponseTime===0).
+      //                          Opt-in via --session-start-* flags.
+      // We take the max because each layer enforces an independent floor
+      // — waiting longer satisfies all of them, so we never need to sum.
+      const nowForPacing = Date.now();
+      const pacingDelay = computePacingDelay(nowForPacing, lastRequestTime, pacingCfg);
+      const thinkDelay = thinkTimeEnabled
+        ? computeThinkTimeDelay(nowForPacing, lastResponseTime, lastResponseTokens, thinkTimeCfg)
+        : 0;
+      const sessionStartDelay = (sessionStartEnabled && lastResponseTime === 0 && lastRequestTime === 0)
+        ? computeSessionStartDelay(sessionStartCfg)
+        : 0;
+      const totalDelay = Math.max(pacingDelay, thinkDelay, sessionStartDelay);
+      if (totalDelay > 0) {
+        await new Promise(r => setTimeout(r, totalDelay));
+      }
+      lastRequestTime = Date.now();
+
+      // Session ID: pool mode uses the per-account identity.sessionId (stable
+      // per account). Single-account mode delegates to the session registry
+      // (src/session-rotation.ts) which applies the configured idle / jitter /
+      // max-age / per-client policy. Resolution happens earlier, at body-build
+      // time, so the CC body's metadata.session_id and the outbound
+      // x-claude-code-session-id header always agree. preBodySessionId holds
+      // the template-build value; in passthrough mode (no template build)
+      // the registry is consulted here instead.
+      let outboundSessionId: string;
+      if (poolAccount) {
+        outboundSessionId = poolAccount.identity.sessionId;
+      } else if (preBodySessionId !== undefined) {
+        outboundSessionId = preBodySessionId;
+      } else {
+        const clientKey = (req.headers['x-session-id'] as string | undefined)
+          ?? (req.headers['x-client-session-id'] as string | undefined);
+        const assigned = sessionRegistry.getOrCreate(clientKey, Date.now());
+        outboundSessionId = assigned.sessionId;
+        SESSION_ID = assigned.sessionId;
+        if (verbose && assigned.rotated && assigned.reason !== 'rotate-new') {
+          console.log(`[dario] #${requestCount} session: rotate (${assigned.reason})`);
+        }
+      }
+
+      const headers: Record<string, string> = {
+        ...staticHeaders,
+        'Authorization': `Bearer ${accessToken}`,
+        'x-claude-code-session-id': outboundSessionId,
+        'anthropic-version': passthrough ? (req.headers['anthropic-version'] as string || '2023-06-01') : '2023-06-01',
+        'anthropic-beta': beta,
+        'x-client-request-id': randomUUID(),
+        // CC sends 600 on first request per session. With rotation, every request is "first"
+        'x-stainless-timeout': '600',
+      };
+
+      // Client-disconnect abort: if the client drops the connection before
+      // we've finished sending the response, we default to aborting the
+      // upstream fetch so Anthropic stops generating (and billing) a
+      // response nobody will read. With `--drain-on-close` set, we
+      // instead keep the reader spinning to consume the full SSE — see
+      // src/stream-drain.ts for the fingerprint rationale. The 5-minute
+      // upstream timeout shares the same controller, so a hung upstream
+      // still gets cut off regardless of drain mode.
+      const upstreamAbort = new AbortController();
+      let clientDisconnected = false;
+      upstreamTimeout = setTimeout(() => {
+        if (!upstreamAbort.signal.aborted) {
+          upstreamAbortReason = 'timeout';
+          upstreamAbort.abort();
+        }
+      }, UPSTREAM_TIMEOUT_MS);
+      onClientClose = () => {
+        const action = decideOnClientClose(
+          res.writableEnded,
+          upstreamAbort.signal.aborted,
+          drainOnClose,
+        );
+        if (action === 'abort') {
+          upstreamAbortReason = 'client_closed';
+          upstreamAbort.abort();
+        } else if (action === 'drain') {
+          clientDisconnected = true;
+          if (verbose) console.log(`[dario] #${requestCount} client disconnected — draining upstream to EOF`);
+        }
+        // noop: either res is already ended (normal teardown) or upstream
+        // is already aborted for another reason.
+      };
+      req.on('close', onClientClose);
+
+      const startTime = Date.now();
+      // Tracks which accounts we've already tried this request — used by the
+      // inside-request 429 failover loop to avoid re-hitting exhausted accounts.
+      const triedAliases = new Set<string>();
+      if (poolAccount) triedAliases.add(poolAccount.alias);
+
+      let upstream!: Response;
+      let peekedBody: string | null = null;
+
+      // Inside-request 429 failover loop (v3.8.0). On a 429, pool mode tries
+      // the next-best account before surfacing the error to the client.
+      // Bounded to pool.size iterations; breaks immediately on any non-429.
+      dispatchLoop: while (true) {
+        // Resolve the current account's egress proxy (re-resolved each
+        // iteration because 429 failover can swap poolAccount below). http/https
+        // pass straight to Bun fetch's `proxy`; socks5 is bridged to a loopback
+        // HTTP proxy (src/socks-bridge.ts). undefined → direct / global proxy.
+        let accountProxy: string | undefined;
+        try {
+          accountProxy = await resolveAccountProxy(poolAccount?.proxy);
+        } catch (err) {
+          if (verbose) console.warn(`[dario] #${requestCount} proxy resolve failed for ${poolAccount?.alias}: ${err instanceof Error ? err.message : err}`);
+          accountProxy = undefined;
+        }
+        // Reorder outbound headers to match CC's captured header sequence
+        // when the live template recorded one. No-op on bundled-only installs.
+        // Skipped in passthrough mode — passthrough means "don't shape the
+        // request to look like CC," and reordering is a form of shaping.
+        const outboundHeaders = passthrough ? headers : orderHeadersForOutbound(headers);
+        upstream = await fetch(targetBase, {
+          method: req.method ?? 'POST',
+          headers: outboundHeaders,
+          body: finalBody ? new Uint8Array(finalBody) : undefined,
+          signal: upstreamAbort.signal,
+          ...(accountProxy ? { proxy: accountProxy } : {}),
+        } as Parameters<typeof fetch>[1] & { proxy?: string });
+
+        // Pool mode: capture rate-limit snapshot from the response. parseRateLimits
+        // returns status='rejected' on 429, which makes the next `select()` call
+        // route traffic away from this account until it resets.
+        if (pool && poolAccount) {
+          const snapshot = parseRateLimits(upstream.headers);
+          if (upstream.status === 429) {
+            pool.markRejected(poolAccount.alias, snapshot);
+          } else {
+            pool.updateRateLimits(poolAccount.alias, snapshot);
+          }
+          // First-sight detector for per-model rate-limit buckets. Anthropic
+          // ships these unannounced — e.g. `7d_sonnet-utilization` appeared
+          // around 2026-04-25 — and verbose-mode users want a heads-up the
+          // first time a new family shows up so they can decide whether to
+          // bump dario's expectations. Pure logging; the routing path
+          // already handles arbitrary family keys (see pool.computeHeadroom).
+          for (const family of Object.keys(snapshot.perModel7d)) {
+            if (!seenPerModelBuckets.has(family)) {
+              seenPerModelBuckets.add(family);
+              if (verbose) {
+                console.log(`[dario] new per-model rate-limit bucket observed: 7d_${family} (util=${snapshot.perModel7d[family]?.toFixed(2)})`);
+              }
+            }
+          }
+        }
+
+      // Auto-retry without context-1m if it triggers a long-context billing error.
+      // Anthropic returns this as either 400 ("long context beta is not yet available
+      // for this subscription") or 429 ("Extra usage is required for long context
+      // requests") depending on the endpoint — we handle both.
+      //
+      // Note: `upstream.text()` consumes the body, so once we peek we MUST
+      // handle the response here (can't fall through to the normal forwarder).
+      peekedBody = null;
+      if ((upstream.status === 400 || upstream.status === 429) && !passthrough) {
+        peekedBody = await upstream.text().catch(() => '');
+        const isLongContextError = peekedBody.includes('long context')
+          || peekedBody.includes('Extra usage is required')
+          || peekedBody.includes('long_context');
+        // Detect "Unexpected value(s) `flag-name` for the `anthropic-beta` header"
+        // — the upstream's way of saying this account tier doesn't have the
+        // flag. Parse out the offending tokens (there can be more than one),
+        // cache them, strip, and retry.
+        const betaRejectedFlags: string[] = [];
+        if (upstream.status === 400 && peekedBody.includes('anthropic-beta')) {
+          const re = /Unexpected value\(s\)\s+((?:`[^`]+`(?:\s*,\s*)?)+)\s+for the `anthropic-beta` header/;
+          const m = peekedBody.match(re);
+          if (m) {
+            for (const tok of m[1].matchAll(/`([^`]+)`/g)) betaRejectedFlags.push(tok[1]);
+          }
+        }
+        if (betaRejectedFlags.length > 0) {
+          const acctKey = poolAccount?.alias ?? ACCOUNT_KEY_SINGLE;
+          let set = unavailableBetas.get(acctKey);
+          if (!set) { set = new Set(); unavailableBetas.set(acctKey, set); }
+          const newFlags: string[] = [];
+          for (const f of betaRejectedFlags) { if (!set.has(f)) { set.add(f); newFlags.push(f); } }
+          if (verbose && newFlags.length > 0) console.log(`[dario] #${requestCount} anthropic-beta rejected (${newFlags.join(',')}) — retrying without (cached for session)`);
+          const reducedBeta = beta.split(',').filter((t) => t.length > 0 && !set!.has(t)).join(',');
+          const retryHeaders = { ...headers, 'anthropic-beta': reducedBeta };
+          const retry = await fetch(targetBase, {
+            method: req.method ?? 'POST',
+            headers: passthrough ? retryHeaders : orderHeadersForOutbound(retryHeaders),
+            body: finalBody ? new Uint8Array(finalBody) : undefined,
+            signal: upstreamAbort.signal,
+            ...(accountProxy ? { proxy: accountProxy } : {}),
+          } as Parameters<typeof fetch>[1] & { proxy?: string });
+          upstream = retry;
+          peekedBody = null;
+          if (pool && poolAccount) {
+            const retrySnapshot = parseRateLimits(upstream.headers);
+            if (upstream.status === 429) {
+              pool.markRejected(poolAccount.alias, retrySnapshot);
+            } else {
+              pool.updateRateLimits(poolAccount.alias, retrySnapshot);
+            }
+          }
+        } else if (isLongContextError) {
+          // Cache the rejection so future requests on this account skip
+          // context-1m up front instead of re-paying the 400/429 round-trip.
+          const acctKey = poolAccount?.alias ?? ACCOUNT_KEY_SINGLE;
+          const firstRejection = !context1mUnavailable.has(acctKey);
+          context1mUnavailable.add(acctKey);
+          if (verbose && firstRejection) console.log(`[dario] #${requestCount} context-1m rejected (${upstream.status}) — retrying without it (cached for session)`);
+          // Strip both long-context betas: context-1m is the primary, but
+          // context-management can trigger the same rejection on models (e.g.
+          // Haiku) that don't support either with OAuth subscription auth.
+          const LONG_CONTEXT_BETAS = new Set(['context-1m-2025-08-07', 'context-management-2025-06-27']);
+          const reducedBeta = beta.split(',').filter((t) => !LONG_CONTEXT_BETAS.has(t)).join(',');
+          const retryHeaders = { ...headers, 'anthropic-beta': reducedBeta };
+          const retry = await fetch(targetBase, {
+            method: req.method ?? 'POST',
+            headers: passthrough ? retryHeaders : orderHeadersForOutbound(retryHeaders),
+            body: finalBody ? new Uint8Array(finalBody) : undefined,
+            signal: upstreamAbort.signal,
+            ...(accountProxy ? { proxy: accountProxy } : {}),
+          } as Parameters<typeof fetch>[1] & { proxy?: string });
+          // Use the retry response from here on — peeked body is now stale
+          upstream = retry;
+          peekedBody = null;
+          // Pool mode: re-capture after the context-1m retry as the snapshot may have changed.
+          if (pool && poolAccount) {
+            const retrySnapshot = parseRateLimits(upstream.headers);
+            if (upstream.status === 429) {
+              pool.markRejected(poolAccount.alias, retrySnapshot);
+            } else {
+              pool.updateRateLimits(poolAccount.alias, retrySnapshot);
+            }
+          }
+        } else if (upstream.status === 429) {
+          // Not a context-1m issue — try pool failover before surfacing to client
+          if (pool && poolAccount) {
+            const nextAccount = pool.selectExcluding(triedAliases, modelFamily(requestModel));
+            if (nextAccount) {
+              triedAliases.add(nextAccount.alias);
+              poolAccount = nextAccount;
+              accessToken = nextAccount.accessToken;
+              headers['Authorization'] = `Bearer ${accessToken}`;
+              headers['x-claude-code-session-id'] = nextAccount.identity.sessionId;
+              pool.rebindSticky(stickyKey, nextAccount.alias);
+              peekedBody = null;
+              continue dispatchLoop;
+            }
+          }
+          const enriched = enrich429(peekedBody, upstream.headers);
+          const responseHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': corsOrigin,
+            ...SECURITY_HEADERS,
+          };
+          for (const [key, value] of upstream.headers.entries()) {
+            if (key.startsWith('x-ratelimit') || key.startsWith('anthropic-ratelimit') || key === 'request-id') {
+              responseHeaders[key] = value;
+            }
+          }
+          requestCount++;
+          // v4: analytics is always-on. Pool mode supplies the rate-limit
+          // snapshot from `poolAccount.rateLimit` (already authoritative);
+          // single-account mode parses it from the upstream response
+          // headers on the spot so the TUI's Hits feed shows the same
+          // bucket / utilization fields in both modes.
+          {
+            const rl = poolAccount?.rateLimit ?? parseRateLimits(upstream.headers);
+            analytics.record({
+              timestamp: Date.now(),
+              account: poolAccount?.alias ?? ACCOUNT_KEY_SINGLE,
+              model: requestModel,
+              inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, thinkingTokens: 0,
+              claim: rl.claim, util5h: rl.util5h, util7d: rl.util7d, overageUtil: rl.overageUtil,
+              latencyMs: Date.now() - startTime, status: 429, isStream: false, isOpenAI,
+            });
+          }
+          res.writeHead(429, responseHeaders);
+          res.end(enriched);
+          return;
+        } else if (upstream.status === 400) {
+          // Non-long-context 400 — forward upstream error directly.
+          // The body is already consumed, so we write it straight out.
+          const responseHeaders: Record<string, string> = {
+            'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+            'Access-Control-Allow-Origin': corsOrigin,
+            ...SECURITY_HEADERS,
+          };
+          for (const [key, value] of upstream.headers.entries()) {
+            if (key === 'request-id') responseHeaders[key] = value;
+          }
+          requestCount++;
+          res.writeHead(400, responseHeaders);
+          res.end(peekedBody);
+          return;
+        }
+      }
+
+      // Auth failover (dario#234). 401/403 means the account's tokens are
+      // server-invalidated — retrying on the same account is guaranteed to
+      // fail, and the rate-limit-driven selector won't route around the
+      // dead account because 401 responses don't include rate-limit
+      // headers, so headroom math sees a healthy idle account. Mark the
+      // cool-down here, try the next-best account, fall through to the
+      // normal forwarding only if no peer is available.
+      if (pool && poolAccount && (upstream.status === 401 || upstream.status === 403)) {
+        pool.markAuthFailure(poolAccount.alias);
+        if (verbose) {
+          console.error(`[dario] auth failure (${upstream.status}) on account "${poolAccount.alias}" — placing in cool-down and attempting failover`);
+        }
+        const nextAccount = pool.selectExcluding(triedAliases, modelFamily(requestModel));
+        if (nextAccount) {
+          triedAliases.add(nextAccount.alias);
+          poolAccount = nextAccount;
+          accessToken = nextAccount.accessToken;
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          headers['x-claude-code-session-id'] = nextAccount.identity.sessionId;
+          pool.rebindSticky(stickyKey, nextAccount.alias);
+          continue dispatchLoop;
+        }
+        // No peer available — fall through to normal forwarding so the
+        // client sees the upstream's 401/403. Don't swallow the error.
+      }
+
+      // Enrich 429 errors with rate limit details from headers (Anthropic only returns "Error")
+      if (upstream.status === 429) {
+        // Try pool failover before surfacing to client
+        if (pool && poolAccount) {
+          const nextAccount = pool.selectExcluding(triedAliases, modelFamily(requestModel));
+          if (nextAccount) {
+            triedAliases.add(nextAccount.alias);
+            poolAccount = nextAccount;
+            accessToken = nextAccount.accessToken;
+            headers['Authorization'] = `Bearer ${accessToken}`;
+            headers['x-claude-code-session-id'] = nextAccount.identity.sessionId;
+            pool.rebindSticky(stickyKey, nextAccount.alias);
+            continue dispatchLoop;
+          }
+        }
+        const errBody = await upstream.text().catch(() => '');
+        const enriched = enrich429(errBody, upstream.headers);
+        const responseHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': corsOrigin,
+          ...SECURITY_HEADERS,
+        };
+        for (const [key, value] of upstream.headers.entries()) {
+          if (key.startsWith('x-ratelimit') || key.startsWith('anthropic-ratelimit') || key === 'request-id') {
+            responseHeaders[key] = value;
+          }
+        }
+        requestCount++;
+        {
+          const rl = poolAccount?.rateLimit ?? parseRateLimits(upstream.headers);
+          analytics.record({
+            timestamp: Date.now(),
+            account: poolAccount?.alias ?? ACCOUNT_KEY_SINGLE,
+            model: requestModel,
+            inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, thinkingTokens: 0,
+            claim: rl.claim, util5h: rl.util5h, util7d: rl.util7d, overageUtil: rl.overageUtil,
+            latencyMs: Date.now() - startTime, status: 429, isStream: false, isOpenAI,
+          });
+        }
+        res.writeHead(429, responseHeaders);
+        res.end(enriched);
+        return;
+      }
+
+      // Non-429 — exit dispatch loop and forward the response to client.
+      // Clear the auth-failure cool-down on the responding account if
+      // the upstream returned a 2xx — this account is healthy again,
+      // so its consecutive-failure counter resets. dario#234.
+      if (pool && poolAccount && upstream.status >= 200 && upstream.status < 300) {
+        pool.clearAuthFailure(poolAccount.alias);
+      }
+      break;
+      } // end dispatchLoop: while (true)
+
+      // Detect streaming from content-type (reliable) or body (fallback)
+      const contentType = upstream.headers.get('content-type') ?? '';
+      const isStream = contentType.includes('text/event-stream');
+
+      // Forward response headers
+      const responseHeaders: Record<string, string> = {
+        'Content-Type': contentType || 'application/json',
+        'Access-Control-Allow-Origin': corsOrigin,
+        ...SECURITY_HEADERS,
+      };
+
+      // Forward rate limit headers (including unified subscription headers)
+      for (const [key, value] of upstream.headers.entries()) {
+        if (key.startsWith('x-ratelimit') || key.startsWith('anthropic-ratelimit') || key === 'request-id') {
+          responseHeaders[key] = value;
+        }
+      }
+
+      requestCount++;
+
+      // Log billing classification on first request or in verbose mode.
+      //
+      // Anthropic is inconsistent about returning rate-limit headers:
+      // - Non-200 responses (429, 500, early aborts) often omit them entirely.
+      // - The overage-utilization header is omitted when there is no overage
+      //   bucket configured or when the subscription claim covers the request
+      //   — in that case "overage" is effectively 0%, not unknown.
+      // Pre-fix we logged `overage: ?` on every five_hour request that had no
+      // overage configured, which looked like a broken parser (see #37 log
+      // dump). Fix: treat missing overage header as 0% when the claim is
+      // five_hour / five_hour_fallback (the subscription covered it), and fall
+      // back to `n/a` in the genuinely-unknown case.
+      const billingClaim = upstream.headers.get('anthropic-ratelimit-unified-representative-claim');
+      const overageUtil = upstream.headers.get('anthropic-ratelimit-unified-overage-utilization');
+      if (requestCount === 1 || verbose) {
+        if (billingClaim) {
+          let overagePct: string;
+          if (overageUtil !== null) {
+            overagePct = `${Math.round(parseFloat(overageUtil) * 100)}%`;
+          } else if (
+            billingClaim === 'five_hour'
+            || billingClaim === 'five_hour_fallback'
+            || billingClaim === 'seven_day'
+            || billingClaim === 'seven_day_fallback'
+          ) {
+            overagePct = '0%';
+          } else {
+            overagePct = 'n/a';
+          }
+          // Show the derived billing bucket as the headline, with the raw
+          // claim value in parens so power users still see the header as-is.
+          // See #34 — users want "am I actually on subscription?" answered
+          // at a glance instead of having to memorize that `five_hour` means
+          // "yes, subscription."
+          const bucket = billingBucketFromClaim(billingClaim);
+          console.log(`[dario] #${requestCount} billing: ${bucket} (${billingClaim}, overage: ${overagePct})`);
+        } else if (verbose) {
+          console.log(`[dario] #${requestCount} billing: headers absent (status=${upstream.status})`);
+        }
+      }
+
+      res.writeHead(upstream.status, responseHeaders);
+
+      if (isStream && upstream.body) {
+        // Analytics accumulators for streaming responses — filled by parsing
+        // message_start / message_delta / content_block_delta SSE events as
+        // they flow through. Token capture must run regardless of pool mode:
+        // gating on `poolAccount` (non-null only in multi-account installs)
+        // skipped the parser entirely on single-account setups, so the
+        // analytics.record() call below persisted zeros for input/output
+        // tokens. SDK streaming clients on single-account installs had their
+        // token usage invisible in /analytics until this fix.
+        let streamInputTokens = 0;
+        let streamOutputTokens = 0;
+        let streamCacheReadTokens = 0;
+        let streamCacheCreateTokens = 0;
+        let streamThinkingChars = 0;
+        const analyticsDecoder = analytics ? new TextDecoder() : null;
+        let analyticsBuffer = '';
+
+        // Stream SSE chunks through
+        const reader = upstream.body.getReader();
+        const decoder = new TextDecoder();
+        // Stateful streaming reverse-mapper for tool_use blocks. Buffers
+        // input_json_delta chunks per content block and emits a single
+        // synthetic delta with the translated parameter shape on
+        // content_block_stop. Issue #29 fix lives here for the streaming
+        // path; the non-streaming reverseMapResponse covers buffered
+        // responses below.
+        const streamMapper = ccToolMap && !isOpenAI
+          ? createStreamingReverseMapper(ccToolMap, reqCtx)
+          : null;
+        // Gated writer — a no-op once the downstream client has gone away
+        // in drain-on-close mode. The read loop keeps consuming so the
+        // upstream sees a full-length read; writes to a closed socket are
+        // suppressed to avoid EPIPE/warnings and pointless work.
+        const writeToClient = (chunk: Uint8Array | string) => {
+          if (!clientDisconnected) res.write(chunk);
+        };
+        try {
+          let buffer = '';
+          const MAX_LINE_LENGTH = 1_000_000; // 1MB max per SSE line
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Parse SSE events for analytics regardless of routing branch
+            if (analyticsDecoder && value) {
+              analyticsBuffer += analyticsDecoder.decode(value, { stream: true });
+              const parts = analyticsBuffer.split('\n\n');
+              analyticsBuffer = parts.pop() ?? '';
+              for (const part of parts) {
+                const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+                if (!dataLine) continue;
+                try {
+                  const e = JSON.parse(dataLine.slice(6)) as Record<string, unknown>;
+                  if (e.type === 'message_start') {
+                    const u = (e.message as { usage?: Record<string, number> } | undefined)?.usage;
+                    if (u) {
+                      streamInputTokens = u.input_tokens ?? 0;
+                      streamCacheReadTokens = u.cache_read_input_tokens ?? 0;
+                      streamCacheCreateTokens = u.cache_creation_input_tokens ?? 0;
+                    }
+                  } else if (e.type === 'message_delta') {
+                    const u = (e as { usage?: Record<string, number> }).usage;
+                    if (u?.output_tokens) streamOutputTokens = u.output_tokens;
+                  } else if (e.type === 'content_block_delta') {
+                    // Mirror the non-streaming parseUsage thinking-token
+                    // heuristic: ~4 characters per token across thinking_delta
+                    // events. Closer than 0, and the same formula the parser
+                    // applies for buffered responses, so streaming + non-
+                    // streaming numbers stay comparable.
+                    const d = (e as { delta?: { type?: string; thinking?: string } }).delta;
+                    if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
+                      streamThinkingChars += d.thinking.length;
+                    }
+                  }
+                } catch { /* ignore malformed SSE events */ }
+              }
+            }
+
+            if (isOpenAI) {
+              // Translate Anthropic SSE → OpenAI SSE
+              buffer += decoder.decode(value, { stream: true });
+              // Reject oversized SSE lines instead of silently truncating.
+              // Truncation hid protocol bugs (a runaway upstream event would
+              // stream indefinitely with the tail rewritten each chunk) and
+              // guaranteed a malformed JSON parse at the client. Since we've
+              // already sent 200 and an SSE content-type, the cleanest exit
+              // is an error event in OpenAI shape + [DONE] sentinel + abort.
+              if (buffer.length > MAX_LINE_LENGTH) {
+                if (verbose) console.warn(`[dario] #${requestCount} SSE line exceeded ${MAX_LINE_LENGTH}B — aborting stream`);
+                const errPayload = JSON.stringify({
+                  error: {
+                    message: `Upstream SSE line exceeded ${MAX_LINE_LENGTH} bytes`,
+                    type: 'upstream_protocol_error',
+                  },
+                });
+                writeToClient(`data: ${errPayload}\n\n`);
+                writeToClient('data: [DONE]\n\n');
+                upstreamAbortReason = 'sse_overflow';
+                upstreamAbort.abort();
+                break;
+              }
+              const lines = buffer.split('\n');
+              buffer = lines.pop() ?? '';
+              for (const line of lines) {
+                const translated = translateStreamChunk(line);
+                if (translated) writeToClient(translated);
+              }
+            } else if (streamMapper) {
+              const out = streamMapper.feed(value);
+              if (out.length > 0) writeToClient(out);
+            } else {
+              writeToClient(value);
+            }
+          }
+          // Flush remaining buffer
+          if (isOpenAI && buffer.trim()) {
+            const translated = translateStreamChunk(buffer);
+            if (translated) writeToClient(translated);
+          }
+          if (streamMapper) {
+            const tail = streamMapper.end();
+            if (tail.length > 0) writeToClient(tail);
+          }
+        } catch (err) {
+          if (verbose) console.error('[dario] Stream error:', sanitizeError(err));
+        }
+        res.end();
+        // Stamp the response-completion timestamp + token count so the
+        // next request's think-time delay can model human read time.
+        // Only on 2xx — error responses don't represent content the user
+        // would read, and using their (often zero) output_tokens would
+        // pin think time to baseMs+jitter on the next request needlessly.
+        if (upstream.status >= 200 && upstream.status < 300) {
+          lastResponseTime = Date.now();
+          lastResponseTokens = streamOutputTokens;
+        }
+        {
+          const rl = poolAccount?.rateLimit ?? parseRateLimits(upstream.headers);
+          analytics.record({
+            timestamp: Date.now(),
+            account: poolAccount?.alias ?? ACCOUNT_KEY_SINGLE,
+            model: requestModel,
+            inputTokens: streamInputTokens, outputTokens: streamOutputTokens,
+            cacheReadTokens: streamCacheReadTokens, cacheCreateTokens: streamCacheCreateTokens,
+            thinkingTokens: Math.round(streamThinkingChars / 4),
+            claim: rl.claim, util5h: rl.util5h, util7d: rl.util7d, overageUtil: rl.overageUtil,
+            latencyMs: Date.now() - startTime, status: upstream.status, isStream: true, isOpenAI,
+          });
+        }
+        writeLogLine(logFileStream, {
+          ts: new Date().toISOString(), req: requestCount,
+          method: req.method ?? '', path: urlPath,
+          model: requestModel || undefined,
+          status: upstream.status, latency_ms: Date.now() - startTime,
+          in_tokens: streamInputTokens, out_tokens: streamOutputTokens,
+          cache_read: streamCacheReadTokens, cache_create: streamCacheCreateTokens,
+          claim: poolAccount?.rateLimit.claim,
+          bucket: poolAccount ? billingBucketFromClaim(poolAccount.rateLimit.claim) : undefined,
+          account: poolAccount?.alias,
+          client: detectedClientForLog,
+          preserve_tools: preserveToolsEffective,
+          stream: true,
+        });
+      } else {
+        // Buffer and forward
+        let responseBody = await upstream.text();
+
+        // Reverse tool name mapping so client sees original names
+        if (ccToolMap) responseBody = reverseMapResponse(responseBody, ccToolMap, reqCtx);
+
+        if (isOpenAI && upstream.status >= 200 && upstream.status < 300) {
+          try {
+            const parsed = JSON.parse(responseBody) as Record<string, unknown>;
+            res.end(JSON.stringify(anthropicToOpenai(parsed)));
+          } catch {
+            res.end(responseBody);
+          }
+        } else {
+          res.end(responseBody);
+        }
+
+        let bufferedUsage: ReturnType<typeof Analytics.parseUsage> | null = null;
+        try {
+          const parsed = JSON.parse(responseBody) as Record<string, unknown>;
+          bufferedUsage = Analytics.parseUsage(parsed);
+        } catch { /* malformed body — log without usage */ }
+
+        // Stamp response-completion state for the next request's think-time
+        // delay. Same 2xx-only rule as the streaming path. Falls back to 0
+        // tokens when the body wasn't JSON or had no usage block — base +
+        // jitter still apply but the per-token component is 0.
+        if (upstream.status >= 200 && upstream.status < 300) {
+          lastResponseTime = Date.now();
+          lastResponseTokens = bufferedUsage?.outputTokens ?? 0;
+        }
+
+        if (bufferedUsage) {
+          try {
+            const rl = poolAccount?.rateLimit ?? parseRateLimits(upstream.headers);
+            analytics.record({
+              timestamp: Date.now(),
+              account: poolAccount?.alias ?? ACCOUNT_KEY_SINGLE,
+              model: bufferedUsage.model || requestModel,
+              inputTokens: bufferedUsage.inputTokens, outputTokens: bufferedUsage.outputTokens,
+              cacheReadTokens: bufferedUsage.cacheReadTokens, cacheCreateTokens: bufferedUsage.cacheCreateTokens,
+              thinkingTokens: bufferedUsage.thinkingTokens,
+              claim: rl.claim, util5h: rl.util5h, util7d: rl.util7d, overageUtil: rl.overageUtil,
+              latencyMs: Date.now() - startTime, status: upstream.status, isStream: false, isOpenAI,
+            });
+          } catch { /* don't let analytics errors break responses */ }
+        }
+
+        writeLogLine(logFileStream, {
+          ts: new Date().toISOString(), req: requestCount,
+          method: req.method ?? '', path: urlPath,
+          model: bufferedUsage?.model || requestModel || undefined,
+          status: upstream.status, latency_ms: Date.now() - startTime,
+          in_tokens: bufferedUsage?.inputTokens, out_tokens: bufferedUsage?.outputTokens,
+          cache_read: bufferedUsage?.cacheReadTokens, cache_create: bufferedUsage?.cacheCreateTokens,
+          claim: poolAccount?.rateLimit.claim,
+          bucket: poolAccount ? billingBucketFromClaim(poolAccount.rateLimit.claim) : undefined,
+          account: poolAccount?.alias,
+          client: detectedClientForLog,
+          preserve_tools: preserveToolsEffective,
+          stream: false,
+        });
+
+        if (verbose) console.log(`[dario] #${requestCount} ${upstream.status}`);
+      }
+    } catch (err) {
+      // Differentiate the three failure modes so each gets the right
+      // response (and so we don't spam logs when clients simply drop).
+      const errLogBase = {
+        ts: new Date().toISOString(), req: requestCount,
+        method: req.method ?? '', path: urlPath,
+        model: requestModel || undefined,
+        client: detectedClientForLog,
+        preserve_tools: preserveToolsEffective,
+      } as const;
+      if (upstreamAbortReason === 'client_closed') {
+        if (verbose) console.log(`[dario] #${requestCount} aborted (client disconnected)`);
+        writeLogLine(logFileStream, { ...errLogBase, reject: 'client-closed' });
+      } else if (upstreamAbortReason === 'timeout') {
+        console.error(`[dario] #${requestCount} upstream timeout after ${UPSTREAM_TIMEOUT_MS / 1000}s`);
+        if (!res.headersSent) {
+          res.writeHead(504, JSON_HEADERS);
+          res.end(JSON.stringify({ error: 'Upstream timeout', message: `Anthropic did not respond within ${UPSTREAM_TIMEOUT_MS / 1000}s` }));
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+        writeLogLine(logFileStream, { ...errLogBase, status: 504, error: 'upstream-timeout' });
+      } else {
+        // Log full error server-side, return generic message to client
+        console.error('[dario] Proxy error:', sanitizeError(err));
+        if (!res.headersSent) {
+          res.writeHead(502, JSON_HEADERS);
+          res.end(JSON.stringify({ error: 'Proxy error', message: 'Failed to reach upstream API' }));
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+        writeLogLine(logFileStream, { ...errLogBase, status: 502, error: sanitizeError(err) });
+      }
+    } finally {
+      // Always clean up the upstream-abort plumbing if it was set up. The
+      // setup happens after the body-read phase, so on fast-path errors
+      // (413, body read timeout) these may still be null — guard accordingly.
+      if (upstreamTimeout !== null) clearTimeout(upstreamTimeout);
+      if (onClientClose !== null) req.off('close', onClientClose);
+      queue.release();
+    }
+  });
+
+  server.on('error', async (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      // Before erroring, check whether dario itself is already running on this
+      // port. If it is, the user just ran `dario login` or `dario proxy` twice
+      // — treat it as a no-op rather than a crash.
+      try {
+        const displayHost = isLoopbackHost(host) ? 'localhost' : host;
+        const res = await fetch(`http://${displayHost}:${port}/health`);
+        const body = await res.json() as Record<string, unknown>;
+        if (body && (body.status === 'ok' || body.status === 'degraded')) {
+          // The /health endpoint's `oauth` field is a status enum
+          // ('healthy' | 'expired' | 'broken' | 'none') — not a token
+          // and not any kind of credential. CodeQL's clear-text-logging
+          // heuristic flags any logged field whose key contains "oauth",
+          // so we whitelist by allow-list rather than disable the rule.
+          const allowedOauthStatuses = new Set(['healthy', 'expired', 'broken', 'none', 'degraded']);
+          const rawOauth = typeof body.oauth === 'string' ? body.oauth : '';
+          const oauthStatusLabel = allowedOauthStatuses.has(rawOauth) ? rawOauth : 'unknown';
+          const requestsServed = typeof body.requests === 'number' ? body.requests : 0;
+          console.log('');
+          console.log(`  dario — already running on http://${displayHost}:${port}`);
+          console.log('');
+          console.log(`  OAuth: ${oauthStatusLabel}  |  requests served: ${requestsServed}`);
+          console.log('');
+          console.log('  Usage:');
+          console.log(`    ANTHROPIC_BASE_URL=http://${displayHost}:${port}`);
+          console.log('    ANTHROPIC_API_KEY=dario');
+          console.log('');
+          process.exit(0);
+        }
+      } catch {
+        // Not dario — fall through to the generic error.
+      }
+      console.error(`[dario] Port ${port} is already in use by another process.`);
+      console.error(`[dario] Free it with: kill $(lsof -ti:${port}) or change the port with --port <n>`);
+    } else {
+      console.error(`[dario] Server error: ${err.message}`);
+    }
+    process.exit(1);
+  });
+
+  // One-line template summary so users can tell at a glance whether they
+  // booted on a fresh live capture or a stale bundled fallback.
+  console.log(`[dario] template: ${describeTemplate(CC_TEMPLATE)}`);
+
+  // Drift check: compare captured CC version to the installed binary. If
+  // they differ, force the background refresh to bypass TTL so the next
+  // startup picks up the new capture. Drifted caches still serve the
+  // current request — the shape is usually compatible — but we flag it.
+  const drift = detectDrift(CC_TEMPLATE);
+  if (drift.drifted) {
+    console.log(`[dario] ⚠  template drift: ${drift.message}`);
+  }
+
+  // Strict-template fail-closed mode. Template must be from a live capture
+  // (not the bundled snapshot) and must not have drifted from the installed
+  // CC. Operator opts in via --strict-template / DARIO_STRICT_TEMPLATE=1.
+  // Same philosophy as --strict-tls: make the unsafe state require intent.
+  // dario#77.
+  if (opts.strictTemplate) {
+    if (CC_TEMPLATE._source === 'bundled') {
+      console.error(`[dario] Refusing to start proxy in --strict-template mode: template source is 'bundled' (no live capture available).`);
+      console.error(`[dario] Fix: run \`claude --print hello\` once so dario can capture the live template, then retry. Or drop --strict-template if the bundled fingerprint is acceptable for this run.`);
+      process.exit(1);
+    }
+    if (drift.drifted) {
+      console.error(`[dario] Refusing to start proxy in --strict-template mode: template drift detected (${drift.message}).`);
+      console.error(`[dario] Fix: rm ~/.dario/cc-template.live.json and retry (the next capture will be against your current CC), or drop --strict-template if the drift is acceptable.`);
+      process.exit(1);
+    }
+  }
+
+  // Compat check: is the installed CC inside the range this dario
+  // release has been tested against? Only log when non-OK so the happy
+  // path stays quiet. `unknown` (no CC on PATH) is also quiet — bundled
+  // template will serve.
+  const compat = checkCCCompat();
+  if (compat.status === 'below-min' || compat.status === 'untested-above') {
+    console.log(`[dario] ⚠  CC compat: ${compat.message}`);
+  }
+
+  // TLS-fingerprint banner (v3.23). Proxy mode terminates TLS from this
+  // process, so the Bun-vs-Node runtime choice is actually on the wire.
+  // Silence via DARIO_QUIET_TLS=1 for known-fine environments.
+  if (runtimeFp.status !== 'bun-match' && process.env.DARIO_QUIET_TLS !== '1') {
+    console.log(`[dario] ⚠  TLS fingerprint: ${runtimeFp.detail}`);
+    if (runtimeFp.hint) console.log(`[dario]    → ${runtimeFp.hint}`);
+    console.log('[dario]    (silence with DARIO_QUIET_TLS=1, or use --strict-tls to hard-fail)');
+  }
+
+  // Kick off a live fingerprint refresh in the background. Re-captures the
+  // user's own CC binary request shape and updates ~/.dario/cc-template.live.json
+  // for the next startup. No-op if CC isn't installed or the cache is fresh.
+  // Never blocks proxy startup; never throws.
+  //
+  // Skipped entirely under --no-live-capture / DARIO_NO_LIVE_CAPTURE=1 —
+  // the operator has opted into a bundled-only shape (air-gapped runs,
+  // reproducible-build CI, deliberate pinning). dario#77.
+  if (!opts.noLiveCapture) {
+    void import('./live-fingerprint.js').then(({ refreshLiveFingerprintAsync }) =>
+      refreshLiveFingerprintAsync({ silent: false, force: drift.drifted }).catch(() => { /* noop */ }),
+    );
+  } else {
+    console.log('[dario] --no-live-capture: background live fingerprint refresh skipped; using bundled template.');
+  }
+
+  server.listen(port, host, () => {
+    const modeLine = passthrough
+      ? 'Mode: passthrough (OAuth swap only, no injection)'
+      : `OAuth: ${status.status} (expires in ${status.expiresIn})`;
+    const modelLine = modelOverride ? `Model: ${modelOverride} (all requests)` : 'Model: passthrough (client decides)';
+    // Pool line surfaces the multi-account state on every startup so the
+    // feature is visible to single-account users (was previously only
+    // logged when pool mode was active).
+    const poolLine = pool
+      ? `Pool: ${accountsList.length} accounts loaded — headroom-routed, sticky for multi-turn`
+      : 'Pool: single-account (run `dario accounts add <alias>` to pool multiple subscriptions)';
+    // Display URL uses `localhost` for loopback binds and the literal host
+    // for exposed binds, so the printed URL is the one a client would
+    // actually use to reach the proxy.
+    const displayHost = isLoopbackHost(host) ? 'localhost' : host;
+    console.log('');
+    console.log(`  dario — http://${displayHost}:${port}`);
+    console.log('');
+    console.log('  Your Claude subscription is now an API.');
+    console.log('');
+    console.log('  Usage:');
+    console.log(`    ANTHROPIC_BASE_URL=http://${displayHost}:${port}`);
+    console.log('    ANTHROPIC_API_KEY=dario');
+    console.log('');
+    console.log(`  ${modeLine}`);
+    console.log(`  ${modelLine}`);
+    console.log(`  ${poolLine}`);
+    if (!isLoopbackHost(host)) {
+      console.log('');
+      console.log(`  ⚠  Bound to ${host} — reachable from other machines on the network.`);
+      if (!apiKey) {
+        console.log('     No auth configured. Any host that can reach this port can proxy');
+        console.log('     requests through your OAuth subscription. Set DARIO_API_KEY');
+        console.log('     before exposing dario beyond loopback.');
+      } else {
+        console.log('     Auth required — accepted credentials: x-api-key / Authorization (DARIO_API_KEY).');
+      }
+    }
+    console.log('');
+  });
+
+  // Session presence heartbeat — keeps the OAuth session marked active
+  // (matches the ~5s cadence of a real Claude Code session).
+  const clientId = randomUUID();
+  const connectedAt = new Date().toISOString();
+  let lastPresencePulse = 0;
+
+  const presenceInterval = setInterval(async () => {
+    const now = Date.now();
+    if (now - lastPresencePulse < 5000) return;
+    lastPresencePulse = now;
+    try {
+      const token = await getAccessToken();
+      const presenceUrl = `${ANTHROPIC_API}/v1/code/sessions/${SESSION_ID}/client/presence`;
+      await fetch(presenceUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'anthropic-client-platform': 'cli',
+        },
+        body: JSON.stringify({ client_id: clientId, connected_at: connectedAt }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    } catch { /* presence is best-effort */ }
+  }, 5000);
+
+  // Periodic token refresh (every 15 minutes)
+  const refreshInterval = setInterval(async () => {
+    try {
+      const s = await getStatus();
+      if (s.status === 'expiring' || s.status === 'expired') {
+        console.log('[dario] Token expiring, refreshing...');
+        await getAccessToken(); // triggers refresh
+      }
+    } catch (err) {
+      console.error('[dario] Background refresh error:', err instanceof Error ? err.message : err);
+    }
+  }, 15 * 60 * 1000);
+
+  // Graceful shutdown
+  const shutdown = () => {
+    console.log('\n[dario] Shutting down...');
+    clearInterval(presenceInterval);
+    clearInterval(refreshInterval);
+    if (logFileStream) logFileStream.end();
+    server.close(() => process.exit(0));
+    // Force exit after 5s if connections don't close
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}

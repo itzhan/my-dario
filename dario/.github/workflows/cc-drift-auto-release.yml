@@ -1,0 +1,451 @@
+name: Auto release on version bump
+
+# Three trigger paths into the same release pipeline:
+#
+# 1. `pull_request: closed` + merged — fast path. Fires both when a
+#    maintainer hits the merge button manually and when `gh pr merge
+#    --auto` consummates a queued auto-merge (verified across v4.0.0,
+#    v4.0.1, v4.1.0 — the auto-merge attributes to the queueing user,
+#    not GITHUB_TOKEN, so GitHub's loop protection does NOT suppress
+#    the event). Release ships within a couple of minutes of merge.
+#
+# 2. `schedule` (hourly) — fallback for the path the fast path can't
+#    cover: workflow-bot-merged PRs where the merge IS attributed to
+#    GITHUB_TOKEN (e.g. a `bot/cc-drift-v<X>` PR auto-merged by the
+#    drafting workflow's own token). GitHub deliberately suppresses
+#    downstream workflows from GITHUB_TOKEN-attributed events to
+#    prevent workflow loops; schedule events are system-initiated and
+#    bypass that suppression. The schedule catches missed releases
+#    within an hour. v3.32.1 / v3.32.2 (2026-04-29) landed on master
+#    without npm-publishing because the bot-token merge path silently
+#    bypassed the pull_request trigger; this fallback exists for that
+#    case specifically.
+#
+# 3. `workflow_dispatch` — manual rescue / re-run trigger. Useful when
+#    you've manually edited the CHANGELOG or version on master without
+#    going through a PR and want to force the pipeline to re-evaluate.
+#
+# Idempotency: the `gate` step checks for an existing `v<version>`
+# tag and short-circuits the rest of the workflow when found. Every
+# trigger path is therefore safe to over-fire; if the pull_request
+# path ships a release and the schedule path fires later, the second
+# run sees the tag and skips cleanly (no failure email).
+#
+# Inline-publish: `gh release create` from this workflow uses
+# GITHUB_TOKEN, so `release: published` doesn't fire downstream
+# workflows here. The build/smoke/tag/release/npm-publish chain
+# therefore runs as one workflow run. (The standalone publish.yml that
+# listened for release:published was removed in #369 — this inline chain
+# is now the ONLY release path, so a manual `gh release create` will
+# NOT publish to npm.)
+#
+# Filename retains `cc-drift-` prefix for git-blame continuity with the
+# originally-named workflow; the scope was generalized on 2026-04-23
+# after v3.31.8–3.31.11 landed on master without reaching npm (see
+# v3.31.11 release notes). The schedule fallback was added on
+# 2026-04-29 after v3.32.1 and v3.32.2 both required manual release
+# creation because the bot-auto-merge path silently bypassed the
+# pull_request trigger.
+#
+# End-to-end loops covered:
+# - CC drift bot: auto-drafter opens `bot/cc-drift-v<X>` PR → bot
+#   auto-merges when CI green → schedule trigger picks it up within
+#   the hour → build + release + npm publish + close matching drift
+#   issues.
+# - Manual feature PR with version bump: maintainer merges → fast path
+#   fires → build + release + npm publish.
+# - Any merge / scheduled tick without an unreleased version: gate
+#   short-circuits, workflow exits in seconds.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  schedule:
+    # 15 past each hour, offset from cc-drift-watch's :00 cron so the
+    # two workflows don't race for the same runner pool. CC patches
+    # drop ~weekly, so up-to-an-hour fallback latency is fine.
+    - cron: '15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # id-token: write required for `npm publish --provenance` SLSA
+  # attestation.
+  id-token: write
+  # `issues: write` is required for the post-release cleanup step that
+  # closes any open `cc-drift` issues matching the CC version just
+  # shipped.
+  issues: write
+  # pull-requests: read is needed by the `pr` step to look up the
+  # merged PR's head ref via `gh pr view` when the workflow is
+  # triggered by schedule (no `github.event.pull_request` payload).
+  pull-requests: read
+  # packages: write is required for the inline docker build/push to
+  # ghcr.io/askalf/dario at the end of the release pipeline. Same loop-
+  # protection reasoning as the inline npm publish — `gh release create`
+  # via GITHUB_TOKEN doesn't fire `release: published`, so the docker
+  # build/push runs inline here (the standalone docker-publish.yml was
+  # removed in #369).
+  packages: write
+
+jobs:
+  release:
+    # For pull_request: require `merged == true` (rules out close-
+    # without-merge). For schedule / workflow_dispatch: always proceed;
+    # the gate step short-circuits when there's nothing to ship.
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    # Serializes overlapping triggers so a pull_request:closed and a
+    # schedule tick that fire within seconds of each other don't both
+    # race past the `gate` step (TOCTOU on `gh release view`) and end
+    # up with one run failing on `gh release create` because the other
+    # already created the tag. cancel-in-progress=false because the
+    # in-flight run is doing real work (build/test/publish); we want
+    # the second to wait, not abort the first.
+    concurrency:
+      group: cc-drift-auto-release-master
+      cancel-in-progress: false
+    steps:
+      - name: Checkout master (post-merge state)
+        uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+        with:
+          ref: master
+          fetch-depth: 2  # need HEAD^1 for the pull_request fast-exit
+
+      - name: Read package.json version
+        id: ver
+        run: |
+          set -eo pipefail
+          CURRENT=$(node -pe "require('./package.json').version")
+          if ! [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to release — package.json version '$CURRENT' doesn't match X.Y.Z" >&2
+            exit 1
+          fi
+
+          # Fast-exit for pull_request triggers when the merge didn't
+          # touch package.json's version. Most feature merges fall into
+          # this case — saving the build/setup steps below keeps the
+          # workflow under 10s for those runs. For schedule /
+          # workflow_dispatch we skip this fast-exit; the gate step
+          # below handles idempotency uniformly via the tag-exists
+          # check, and we still want to catch unreleased version bumps
+          # made in commits older than HEAD^1 (e.g., a bot-merged
+          # version bump followed by an unrelated docs commit on
+          # master).
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PARENT=$(git show HEAD^1:package.json 2>/dev/null \
+              | node -pe "JSON.parse(require('fs').readFileSync(0,'utf-8')).version" \
+              || echo "")
+            if [ "$CURRENT" = "$PARENT" ]; then
+              echo "Version unchanged at $CURRENT (pull_request fast-exit)."
+              echo "needs_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Version bumped on this merge: $PARENT → $CURRENT"
+          else
+            echo "Trigger ${{ github.event_name }} — skipping HEAD^1 fast-exit."
+          fi
+
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "needs_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Idempotency gate (release + npm-publish + ghcr check)
+        id: gate
+        if: steps.ver.outputs.needs_release == 'true'
+        # Two-axis check: a release ships when BOTH the GitHub release tag
+        # exists AND the npm registry has the version. Previous design only
+        # checked the GitHub tag — when an earlier run created the tag but
+        # failed at npm publish (transient registry 5xx, expired NPM_TOKEN,
+        # etc.), the schedule fallback then saw the tag and skipped
+        # everything, leaving npm permanently behind. v4.8.2 and v4.8.3
+        # both landed in that state on 2026-05-19 — github releases exist,
+        # npm latest stayed pinned at 4.8.1.
+        #
+        # Now: emit fine-grained outputs so downstream steps can skip the
+        # work that's already done and retry the work that isn't:
+        #   - gh_release_exists  → "Create GitHub release" skips
+        #   - npm_published      → "npm publish" skips
+        #   - proceed            → false ONLY when both are true (fully shipped)
+        #
+        # Queries the GitHub API directly (`gh release view`) rather than
+        # `git rev-parse` against the local checkout — the checkout uses
+        # `fetch-depth: 2` for HEAD^1 version-diff and does not fetch tags.
+        # npm check uses `npm view`; tolerates 404 (treats package-not-found
+        # as not-published, fresh release case).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          PKG_NAME="$(node -p 'require("./package.json").name')"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh_exists=true
+          else
+            gh_exists=false
+          fi
+
+          # `npm view <name>@<version> version` prints the version if
+          # published, exits non-zero with an empty stdout otherwise.
+          # Wrap with `|| true` so missing packages don't fail the step.
+          if [ -n "$(npm view "$PKG_NAME@$VERSION" version 2>/dev/null || true)" ]; then
+            npm_exists=true
+          else
+            npm_exists=false
+          fi
+
+          echo "gh_release_exists=$gh_exists" >> "$GITHUB_OUTPUT"
+          echo "npm_published=$npm_exists" >> "$GITHUB_OUTPUT"
+
+          if [ "$gh_exists" = "true" ] && [ "$npm_exists" = "true" ]; then
+            echo "Release $TAG fully shipped (GitHub + npm) — idempotent skip."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release $TAG incomplete (gh=$gh_exists, npm=$npm_exists) — proceeding to fill the gaps."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve merged PR context
+        id: pr
+        if: steps.gate.outputs.proceed == 'true'
+        # Identify the PR whose merge bumped the version, regardless of
+        # how this workflow fired. For pull_request events the payload
+        # gives us number + head ref directly. For schedule /
+        # workflow_dispatch we parse the HEAD commit message for `(#N)`
+        # (squash-merge convention on master) and resolve via
+        # `gh pr view N --json url,headRefName`. Outputs (all may be
+        # empty if the PR can't be derived):
+        #   - pr_number  PR number
+        #   - pr_url     PR HTML url
+        #   - head_ref   PR head branch (UNTRUSTED — pass via env in
+        #                consumers, never inline-interpolate)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pull-request payload fields are surfaced as env vars (not
+          # inline-interpolated) — head.ref is attacker-controlled
+          # (PR branch name) and inline `${{ }}` substitution at
+          # shell-parse time would allow injection. Number / url are
+          # server-generated and lower-risk, but kept consistent.
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_PR_URL: ${{ github.event.pull_request.html_url }}
+          EVENT_PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -eo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            PR_NUMBER="$EVENT_PR_NUMBER"
+            PR_URL="$EVENT_PR_URL"
+            PR_HEAD_REF="$EVENT_PR_HEAD_REF"
+          else
+            COMMIT_MSG=$(git log -1 --pretty=%s HEAD)
+            echo "HEAD commit subject: $COMMIT_MSG"
+            PR_NUMBER=$(echo "$COMMIT_MSG" | sed -nE 's/.*\(#([0-9]+)\)$/\1/p')
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No (#N) suffix on HEAD commit — proceeding without PR context."
+              PR_URL=""
+              PR_HEAD_REF=""
+            else
+              PR_INFO=$(gh pr view "$PR_NUMBER" --json url,headRefName 2>/dev/null || echo "{}")
+              PR_URL=$(echo "$PR_INFO" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf-8')).url || ''")
+              PR_HEAD_REF=$(echo "$PR_INFO" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf-8')).headRefName || ''")
+            fi
+          fi
+          echo "Resolved PR: number=$PR_NUMBER head_ref=$PR_HEAD_REF"
+          {
+            echo "pr_number=$PR_NUMBER"
+            echo "pr_url=$PR_URL"
+            echo "head_ref=$PR_HEAD_REF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ─── Build + smoke pipeline (was publish.yml, removed in #369) ──
+      # We do this BEFORE cutting the GitHub release, so a failing
+      # build/smoke aborts everything — no release, no npm publish, no
+      # half-shipped state.
+
+      - name: Set up Node
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: npm ci
+        if: steps.gate.outputs.proceed == 'true'
+        run: npm ci
+
+      - name: build
+        if: steps.gate.outputs.proceed == 'true'
+        run: npm run build
+
+      - name: --help smoke
+        if: steps.gate.outputs.proceed == 'true'
+        run: node dist/cli.js help
+
+      # ─── Release + publish ─────────────────────────────────────────
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        if: steps.gate.outputs.proceed == 'true'
+        # Pull the section for this version from CHANGELOG.md so the
+        # GitHub release body shows what was in the bump, not a generic
+        # "see changelog" link.
+        #
+        # The extraction logic lives in `scripts/extract-release-notes.mjs`
+        # with full unit-test coverage in `test/extract-release-notes.mjs`
+        # — a future regression to the empty-capture state breaks CI
+        # before it ships. Pre-refactor history (inline `node -e` regex
+        # with /m flag that silently captured the empty string for 39
+        # consecutive releases) is documented in the script's header
+        # and on PR #276.
+        run: |
+          set -eo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          node scripts/extract-release-notes.mjs "$VERSION" --file CHANGELOG.md > release-notes.md
+          echo "--- release-notes.md ---"
+          cat release-notes.md
+
+      - name: Create GitHub release
+        # Skip if the GH release tag already exists — a prior run created
+        # it but failed downstream (npm or ghcr). The gate left proceed=true
+        # so the remaining publish steps retry; this one is already done.
+        if: steps.gate.outputs.proceed == 'true' && steps.gate.outputs.gh_release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          {
+            if [ -n "$PR_NUMBER" ] && [ -n "$PR_URL" ]; then
+              echo "Auto-released from merge of [PR #${PR_NUMBER}](${PR_URL}) (trigger: ${TRIGGER})."
+            else
+              echo "Auto-released from master HEAD (trigger: ${TRIGGER}; no PR context resolved)."
+            fi
+            echo ""
+            cat release-notes.md
+            echo ""
+            echo "---"
+            echo ""
+            echo "Built + tested + npm-published inline by \`cc-drift-auto-release.yml\` on this run. See the workflow log for the provenance-attested publish output."
+          } > body.md
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file body.md
+
+      - name: npm publish
+        # Skip if npm already has this version. Lets a re-run target only
+        # the missing publish (e.g. retrying after a transient npm 5xx)
+        # without re-publishing what's already on the registry.
+        if: steps.gate.outputs.proceed == 'true' && steps.gate.outputs.npm_published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      # ─── Inline Docker publish to GHCR ─────────────────────────────
+      # Same loop-protection reason as the inline npm publish above:
+      # `gh release create` via GITHUB_TOKEN doesn't fire
+      # `release: published`. The standalone docker-publish.yml was
+      # removed in #369; its build/push steps live inline here.
+      - name: Set up QEMU
+        if: steps.gate.outputs.proceed == 'true'
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.proceed == 'true'
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        if: steps.gate.outputs.proceed == 'true'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker tag matrix
+        if: steps.gate.outputs.proceed == 'true'
+        id: docker_meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ghcr.io/askalf/dario
+          tags: |
+            type=raw,value=v${{ steps.ver.outputs.version }}
+            type=raw,value=latest
+            type=match,pattern=v\d+\.\d+,value=v${{ steps.ver.outputs.version }}
+            type=match,pattern=v\d+,value=v${{ steps.ver.outputs.version }}
+
+      - name: Build and push (multi-arch)
+        if: steps.gate.outputs.proceed == 'true'
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Close matching cc-drift issues
+        if: |
+          steps.gate.outputs.proceed == 'true' &&
+          startsWith(steps.pr.outputs.head_ref, 'bot/cc-drift-')
+        # The bot's branch name encodes the CC version (`bot/cc-drift-
+        # v2.1.120`). The watcher's hourly run opens issues with titles
+        # `CC drift detected: v<version>` and `CC authorize-probe drift:
+        # v<version>` for the same version. Once the release ships,
+        # those issues are resolved — close them so the tracker shows
+        # the loop closed cleanly. Idempotent: `gh issue close` on a
+        # closed issue is a no-op that exits 0.
+        #
+        # Only runs for bot-drift PRs; manual-feature PRs skip this
+        # step (no bot-tracked issues to close).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # head_ref via env rather than inline ${{ }} interpolation —
+          # the branch name is attacker-controlled and inline
+          # substitution at shell-parse time would allow script
+          # injection via a PR branch named e.g.
+          # `bot/cc-drift-v1.0.0$(malicious)`. The step `if:` restricts
+          # to bot/cc-drift-* by prefix, but `startsWith()` doesn't
+          # reject trailing shell metacharacters.
+          PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        run: |
+          BRANCH="$PR_HEAD_REF"
+          if [[ "$BRANCH" != bot/cc-drift-v* ]]; then
+            echo "Branch $BRANCH doesn't match expected shape; skipping issue cleanup."
+            exit 0
+          fi
+          CC_VERSION="${BRANCH#bot/cc-drift-v}"
+          DARIO_VERSION="${{ steps.ver.outputs.version }}"
+
+          for TITLE_PREFIX in "CC drift detected" "CC authorize-probe drift"; do
+            TITLE="${TITLE_PREFIX}: v${CC_VERSION}"
+            NUMBERS=$(gh issue list --label cc-drift --state open --search "in:title \"${TITLE}\"" --json number --jq '.[].number' || echo "")
+            for n in $NUMBERS; do
+              gh issue close "$n" --comment "Resolved by v${DARIO_VERSION} (release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${DARIO_VERSION}). Closed automatically by \`cc-drift-auto-release.yml\`."
+              echo "Closed issue #$n"
+            done
+          done
+
+      - name: Post-release summary
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          echo "✓ Released v${{ steps.ver.outputs.version }}"
+          if [ -n "$PR_NUMBER" ]; then
+            echo "✓ Triggered by ${{ github.event_name }} (PR #$PR_NUMBER, head: $PR_HEAD_REF)"
+          else
+            echo "✓ Triggered by ${{ github.event_name }} (no PR context resolved)"
+          fi
+          echo "✓ Published to npm (with SLSA provenance)"
+          if [[ "$PR_HEAD_REF" == bot/cc-drift-v* ]]; then
+            echo "→ matching cc-drift issues were closed"
+          fi

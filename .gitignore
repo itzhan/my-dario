@@ -1,0 +1,13 @@
+# Secrets — never commit
+.env
+**/.env
+**/.env.local
+
+# Dependencies & build artifacts
+**/node_modules/
+**/dist/
+**/.next/
+**/*.tsbuildinfo
+
+# OS
+.DS_Store

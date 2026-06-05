@@ -1,0 +1,371 @@
+name: CC drift watch
+
+# Hourly scan of @anthropic-ai/claude-code@latest against dario's pinned
+# FALLBACK OAuth config, baked request template, and supported-range max.
+# Catches CC-shipped changes the hour they land instead of up to 24 hours
+# later under the old nightly cadence (see dario #40 / #42 for the
+# motivating pattern this is designed to pre-empt).
+#
+# Hourly runs are gated: only the cheap `version_check` job runs every
+# hour — it fetches CC's latest version from the npm registry and early-
+# exits if we've already run a full check against that version. The
+# heavyweight `check` job only fires when the npm version has changed,
+# so the cost is roughly 24 fast-gate runs per day + 1 full run per
+# CC release (historically ~1/week).
+
+on:
+  schedule:
+    # Every hour at :00. Early-exit via cache means only the gate job
+    # actually does work unless CC's npm latest has changed since the
+    # last full run.
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Bypass the version cache (always run full check)
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+permissions:
+  # contents: write + pull-requests: write are needed by the auto-draft
+  # step — it commits a patch, pushes a branch, and opens a draft PR.
+  # Master still has branch protection (force-push / delete denied,
+  # required status checks), so the bot can only push to bot/* branches
+  # and maintainer merges through the PR UI.
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # Cheap gate: one curl to npm's registry + a cache lookup. ~5–10s per
+  # run including the runner's own boot cost. Outputs `should_run` =
+  # true when CC's npm latest is a version we haven't full-checked yet.
+  version_check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.probe.outputs.version }}
+      should_run: ${{ steps.gate.outputs.should_run }}
+    steps:
+      - name: Fetch CC latest version from npm registry
+        id: probe
+        run: |
+          set -eo pipefail
+          # Single HTTP GET. Fails the job on network error / bad JSON so
+          # a registry outage doesn't silently mask drift.
+          VERSION=$(curl -sS --fail --max-time 15 \
+            https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
+            | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          if [ -z "$VERSION" ]; then
+            echo "Empty version from npm registry — aborting."
+            exit 1
+          fi
+          echo "CC latest on npm: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache sentinel (keyed on CC version)
+        id: version_cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          # The path is a tiny marker file; only its presence matters.
+          # The cache KEY is what gates: if we've ever saved a cache
+          # with this CC version's key, we've full-checked that version.
+          path: .cc-version-sentinel
+          key: cc-drift-checked-${{ steps.probe.outputs.version }}
+
+      - name: Gate — run full check only when version changed (or --force)
+        id: gate
+        run: |
+          FORCED='${{ inputs.force }}'
+          if [ "$FORCED" = "true" ]; then
+            echo "Manual --force=true — running full check regardless of cache."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.version_cache.outputs.cache-hit }}" = "true" ]; then
+            echo "CC v${{ steps.probe.outputs.version }} already full-checked (cache hit). Skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "CC v${{ steps.probe.outputs.version }} is new since the last full check — proceeding."
+            # Write the sentinel so the cache action saves this version
+            # as "seen" at job end. The mark is per-version (key) not
+            # per-run — same version across hours = cache hit.
+            mkdir -p "$(dirname .cc-version-sentinel)"
+            touch .cc-version-sentinel
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check:
+    needs: version_check
+    if: needs.version_check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+        with:
+          # Persist the drift-bot PAT so the later `git push origin bot/cc-drift-*`
+          # and `gh pr create` are attributed to a real user identity rather than
+          # GITHUB_TOKEN. GitHub deliberately suppresses downstream workflow runs
+          # (CI on pull_request) when the triggering event is attributed to
+          # GITHUB_TOKEN — that suppression is what stranded #352 / #356 / #359
+          # with no checks and made `gh pr merge --auto` wait forever. Pushing +
+          # opening the PR under the PAT identity restores normal CI firing.
+          token: ${{ secrets.DARIO_DRIFT_BOT_PAT }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run drift check
+        id: drift
+        run: |
+          set +e
+          node scripts/check-cc-drift.mjs > drift-report.json 2> drift-log.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat drift-log.txt
+          echo "--- report ---"
+          cat drift-report.json
+
+      - name: Extract CC version from report
+        if: always()
+        id: ver
+        run: |
+          # `try/catch` falls back to 'unknown' so a missing-or-broken
+          # drift-report.json doesn't blow up the downstream issue-open
+          # step (which gracefully labels the issue "CC drift detected:
+          # vunknown"). The error itself goes to stderr so an operator
+          # debugging a silent run can tell "no report" from "broken
+          # report" — pre-2026-05-15 this swallowed errors with no
+          # diagnostic at all.
+          CC_VERSION=$(node -e "try { console.log(JSON.parse(require('fs').readFileSync('drift-report.json','utf-8')).ccVersion || 'unknown') } catch (e) { console.error('cc-version-extract failed: ' + e.message); console.log('unknown') }")
+          echo "cc_version=$CC_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Open / update drift issue
+        if: steps.drift.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CC_VERSION="${{ steps.ver.outputs.cc_version }}"
+          TITLE="CC drift detected: v${CC_VERSION}"
+          EXISTING=$(gh issue list --label cc-drift --state open --search "in:title \"${TITLE}\"" --json number --jq '.[0].number')
+
+          {
+            echo "## Drift report"
+            echo ""
+            echo "Generated by \`.github/workflows/cc-drift-watch.yml\` against \`@anthropic-ai/claude-code@${CC_VERSION}\` on \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`."
+            echo ""
+            echo "### Raw report"
+            echo '```json'
+            cat drift-report.json
+            echo '```'
+            echo ""
+            echo "### Run"
+            echo ""
+            echo "- [Workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo "- [Re-run manually](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/cc-drift-watch.yml)"
+          } > issue-body.md
+
+          if [ -z "$EXISTING" ]; then
+            gh issue create \
+              --title "$TITLE" \
+              --label cc-drift \
+              --body-file issue-body.md
+          else
+            echo "Issue #$EXISTING already open for this version; appending a new run as a comment."
+            gh issue comment "$EXISTING" --body-file issue-body.md
+          fi
+
+      - name: Auto-draft drift-fix PR
+        # Only when the binary-scan drift check flagged an item. The
+        # auto-drafter reads drift-report.json and, for known one-line
+        # drift classes (v1: compat.range / SUPPORTED_CC_RANGE.maxTested
+        # bumps), applies the patch, pushes to a bot branch, opens a PR,
+        # and turns on auto-merge. Once required CI checks pass, GitHub
+        # squash-merges the PR; cc-drift-auto-release.yml then tags the
+        # release and ships to npm inline. Other drift classes still
+        # just open the plain issue via the earlier step.
+        #
+        # GH_TOKEN uses DARIO_DRIFT_BOT_PAT (not GITHUB_TOKEN): GitHub
+        # suppresses downstream workflow runs for events attributed to
+        # GITHUB_TOKEN, so a PR opened with GITHUB_TOKEN never gets CI
+        # checks, and `gh pr merge --auto` then waits forever for checks
+        # that won't appear (this stranded #352, #356, #359 — each one
+        # required a manual chore/release-* rollup PR to ship).
+        if: steps.drift.outputs.exit_code != '0'
+        id: auto_draft
+        env:
+          GH_TOKEN: ${{ secrets.DARIO_DRIFT_BOT_PAT }}
+        run: |
+          set -eo pipefail
+
+          # The script writes its own artifact files (drift-report.json,
+          # drift-log.txt, auto-draft-result.json, pr-body.md, etc.) into
+          # the workdir. Stage ONLY the files it actually patched so CI
+          # artifacts don't end up in the commit — that requires the
+          # explicit `changedFiles` list emitted alongside `fixed: true`.
+          DRAFT_RESULT=$(node scripts/auto-draft-drift-fix.mjs drift-report.json)
+          echo "$DRAFT_RESULT" > auto-draft-result.json
+
+          FIXED=$(echo "$DRAFT_RESULT" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).fixed")
+          REASON=$(echo "$DRAFT_RESULT" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).reason")
+          echo "auto-draft verdict: fixed=$FIXED reason=$REASON"
+          echo "fixed=$FIXED" >> "$GITHUB_OUTPUT"
+
+          if [ "$FIXED" != "true" ]; then
+            exit 0
+          fi
+
+          BRANCH=$(echo "$DRAFT_RESULT" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).branchName")
+          TITLE=$(echo "$DRAFT_RESULT" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).prTitle")
+          echo "$DRAFT_RESULT" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).prBody" > pr-body.md
+
+          # Skip if a PR for this branch already exists (a previous hourly
+          # run opened it; no point re-drafting the same change).
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists for branch $BRANCH; skipping."
+            exit 0
+          fi
+
+          git config user.email "actions@github.com"
+          git config user.name "cc-drift-watch[bot]"
+          git checkout -b "$BRANCH"
+
+          # Stage only the files the auto-drafter patched. Using `git add
+          # -A` here would sweep in CI artifacts (drift-report.json,
+          # drift-log.txt, issue-body.md, pr-body.md, auto-draft-result.json).
+          echo "$DRAFT_RESULT" \
+            | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.join('\n')" \
+            | xargs -I {} git add -- {}
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body-file pr-body.md \
+            --label cc-drift)
+          echo "Opened $PR_URL"
+
+          # Enable auto-merge: GitHub will squash-merge the PR as soon as
+          # all required status checks pass (build × 3 node versions,
+          # validate-package-json, analyze, actionlint). Branch protection
+          # on master gates the actual merge; if a check fails the PR
+          # stays open with the failure visible and the bot branch
+          # preserved for inspection.
+          gh pr merge "$PR_URL" --auto --squash --delete-branch
+
+      - name: Close resolved drift issues
+        if: steps.drift.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # On a clean run, close any open cc-drift issues whose version
+          # matches the one we just verified — drift resolved means the
+          # next dario release picked up the change and the pin moved.
+          CC_VERSION="${{ steps.ver.outputs.cc_version }}"
+          TITLE_MATCH="CC drift detected: v${CC_VERSION}"
+          NUMBERS=$(gh issue list --label cc-drift --state open --search "in:title \"${TITLE_MATCH}\"" --json number --jq '.[].number')
+          for n in $NUMBERS; do
+            gh issue close "$n" --comment "Resolved — cc-drift-watch ran clean against CC v${CC_VERSION}. Pinned constants now match."
+          done
+
+      - name: Install Playwright Chromium for headless probe
+        # The fetch-based probe (check-cc-authorize-probe.mjs) is blocked
+        # by Cloudflare's bot challenge from GitHub Actions IPs. Headless
+        # Chromium speaks TLS like a real browser and passes CF's JS
+        # challenge, so the probe becomes a usable nightly signal instead
+        # of returning "inconclusive" on most runs. Playwright is installed
+        # ad-hoc in CI only — never declared in dario's package.json,
+        # preserving the zero-runtime-dependency policy.
+        run: |
+          npm install --no-save playwright@1.49.0
+          npx playwright install chromium --with-deps
+
+      - name: Run authorize-URL probe (headless Chromium)
+        id: probe
+        # Hits the authorize endpoint with dario's pinned scope set and
+        # with a 5-scope variant (`org:create_api_key` removed) to watch
+        # for server-side policy flips on this client_id. Same assertion
+        # shape as check-cc-authorize-probe.mjs; only the transport is
+        # different. Falls back to the fetch variant in the next step if
+        # headless throws (e.g. Chromium install failure).
+        run: |
+          set +e
+          node scripts/check-cc-authorize-probe-headless.mjs > probe-report.json 2> probe-log.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat probe-log.txt
+          echo "--- report ---"
+          cat probe-report.json
+
+      - name: Run authorize-URL probe (fetch fallback, only if headless failed)
+        # Headless exit 2 means Playwright wasn't available. Any other
+        # non-zero could be a real drift signal or a Chromium crash;
+        # run the fetch-based script so we at least have SOMETHING to
+        # compare against (even if it's CF-blocked → inconclusive).
+        if: steps.probe.outputs.exit_code == '2'
+        run: |
+          set +e
+          node scripts/check-cc-authorize-probe.mjs > probe-report.json 2> probe-log.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat probe-log.txt
+          echo "--- report ---"
+          cat probe-report.json
+
+      - name: Open / update authorize-probe drift issue
+        if: steps.probe.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CC_VERSION="${{ steps.ver.outputs.cc_version }}"
+          TITLE="CC authorize-probe drift: v${CC_VERSION}"
+          EXISTING=$(gh issue list --label cc-drift --state open --search "in:title \"${TITLE}\"" --json number --jq '.[0].number')
+
+          {
+            echo "## Authorize-probe drift"
+            echo ""
+            echo "The live authorize-URL probe flagged drift against Anthropic's authorize endpoint."
+            echo "This is a different class of signal from the binary-scan watcher — it confirms the"
+            echo "server-side policy engine, not just the shipped CC binary. See dario #42 for the"
+            echo "motivating incident."
+            echo ""
+            echo "### Raw report"
+            echo '```json'
+            cat probe-report.json
+            echo '```'
+            echo ""
+            echo "### Run"
+            echo ""
+            echo "- [Workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo "- [Re-run manually](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/cc-drift-watch.yml)"
+          } > probe-issue-body.md
+
+          if [ -z "$EXISTING" ]; then
+            gh issue create \
+              --title "$TITLE" \
+              --label cc-drift \
+              --body-file probe-issue-body.md
+          else
+            echo "Issue #$EXISTING already open for this version; appending a new run as a comment."
+            gh issue comment "$EXISTING" --body-file probe-issue-body.md
+          fi
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cc-drift-report
+          path: |
+            drift-report.json
+            drift-log.txt
+            probe-report.json
+            probe-log.txt
+          retention-days: 30

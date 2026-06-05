@@ -1,0 +1,47 @@
+name: actionlint
+
+# Validates GitHub Actions workflow YAML against actionlint's rule set.
+# Catches interpolation/quoting bugs, bad `needs:` refs, shell-quoting,
+# and untrusted-input-in-run-script injection patterns.
+#
+# Runs on every PR + every push to master, no path filter. `actionlint`
+# is a required status check in branch protection (added 2026-04-23).
+# Path-filtered required checks can never report on PRs that don't touch
+# the filtered paths, which leaves merges permanently blocked — found
+# this in practice when PR #130 (src-only) hit indefinite BLOCK state.
+# Same fix already in place on claude-bridge + deepdive. 30s of CI per
+# unrelated PR is cheaper than the footgun.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: askalf/checkout-with-retry@744195501c3e2b794c50370b753a7b8c93d084f5  # v1.0.0
+
+      - name: Install actionlint v1.7.1
+        # Official release tarball, pinned to a specific version. Skipping
+        # SHA256 verification here because actionlint is a CI-only lint
+        # artifact that never ships to users — the supply-chain risk is
+        # a broken build, not a compromised runtime. If this becomes a
+        # required check, revisit with a pinned checksum.
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tgz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.1/actionlint_1.7.1_linux_amd64.tar.gz
+          tar xzf actionlint.tgz actionlint
+          chmod +x actionlint
+          ./actionlint -version
+
+      - name: Run actionlint
+        # -color for readable logs; default shellcheck integration is on,
+        # which is what catches the run: block issues we actually care about.
+        run: ./actionlint -color
