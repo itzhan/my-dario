@@ -13,6 +13,7 @@ import { Analytics, billingBucketFromClaim, type RequestRecord } from './analyti
 import { OverageGuard, buildHaltErrorBody, type HaltState } from './overage-guard.js';
 import { notify as osNotify } from './notify.js';
 import { loadAllAccounts, loadAccount, refreshAccountToken, resyncLoginFromCredentialsIfStale } from './accounts.js';
+import { adminGenerateAuthUrl, adminExchangeCode, adminPersistAccount } from './admin-accounts.js';
 import { resolveAccountProxy, classifyProxy, isBunRuntime } from './socks-bridge.js';
 import { getOpenAIBackend, isOpenAIModel, forwardToOpenAI, type BackendCredentials } from './openai-backend.js';
 import { RequestQueue, QueueFullError, QueueTimeoutError, DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_QUEUED, DEFAULT_QUEUE_TIMEOUT_MS } from './request-queue.js';
@@ -637,6 +638,24 @@ export function describeAuthReject(
 }
 
 /**
+ * Read and JSON-parse a request body, capped at 64 KiB. Admin endpoints only —
+ * the proxy hot-path streams bodies separately. Returns {} for an empty body.
+ */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > 64 * 1024) throw new Error('request body too large');
+    chunks.push(buf);
+  }
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  if (!raw) return {};
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/**
  * Enrich Anthropic's unhelpful 429 "Error" body with rate limit details from headers.
  */
 function enrich429(body: string, headers: Headers): string {
@@ -811,7 +830,14 @@ export async function startProxy(opts: ProxyOptions = {}): Promise<void> {
   }
 
   const accountsList = await loadAllAccounts();
-  const pool = accountsList.length >= 2 ? new AccountPool() : null;
+  // Pool activates with >=1 account in accounts/. Upstream dario uses >=2 —
+  // it expects a lone account to live in credentials.json via `dario login`,
+  // so a single file in accounts/ would otherwise be orphaned (pool never
+  // trips AND single-account mode reads credentials.json, not accounts/).
+  // This deployment registers accounts straight into accounts/ over the
+  // /admin API and never runs `dario login`, so one registered account must
+  // trip pool mode. Zero files still → null → the single-account path.
+  const pool = accountsList.length >= 1 ? new AccountPool() : null;
   // Per-model rate-limit bucket families seen during this proxy run. First-
   // sight is logged once when verbose so a new Anthropic bucket (e.g. an
   // eventual `7d_opus`) doesn't slip past unnoticed. Pure observability —
@@ -1330,6 +1356,96 @@ export async function startProxy(opts: ProxyOptions = {}): Promise<void> {
         wasHalted,
         resumedAt: new Date().toISOString(),
       }));
+      return;
+    }
+
+    // Admin account provisioning (auth-gated above). Lets a remote provisioner
+    // add a pool account over HTTP via the manual copy-paste OAuth flow:
+    // generate-auth-url → (browser approves) → exchange-code → accounts.
+    // Mutation over HTTP is intentional here (unlike the read-only /accounts
+    // GET) and only reachable with DARIO_API_KEY set. See admin-accounts.ts.
+    if (urlPath === '/admin/oauth/generate-auth-url' && req.method === 'POST') {
+      try {
+        const { authUrl, sessionId } = await adminGenerateAuthUrl();
+        res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ auth_url: authUrl, session_id: sessionId }));
+      } catch (e) {
+        res.writeHead(500, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ error: 'generate_auth_url_failed', message: sanitizeError(e) }));
+      }
+      return;
+    }
+    if (urlPath === '/admin/oauth/exchange-code' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const sessionId = typeof body.session_id === 'string' ? body.session_id : '';
+        const code = typeof body.code === 'string' ? body.code : '';
+        if (!sessionId || !code) {
+          res.writeHead(400, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+          res.end(JSON.stringify({ error: 'bad_request', message: 'session_id and code are required' }));
+          return;
+        }
+        const tokens = await adminExchangeCode(sessionId, code);
+        res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({
+          access_token: tokens.accessToken,
+          refresh_token: tokens.refreshToken,
+          expires_at: tokens.expiresAt,
+          expires_in: Math.max(0, Math.floor((tokens.expiresAt - Date.now()) / 1000)),
+          scopes: tokens.scopes,
+        }));
+      } catch (e) {
+        res.writeHead(400, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ error: 'exchange_code_failed', message: sanitizeError(e) }));
+      }
+      return;
+    }
+    if (urlPath === '/admin/accounts' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const accessToken = typeof body.access_token === 'string' ? body.access_token : '';
+        const refreshToken = typeof body.refresh_token === 'string' ? body.refresh_token : '';
+        if (!accessToken || !refreshToken) {
+          res.writeHead(400, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+          res.end(JSON.stringify({ error: 'bad_request', message: 'access_token and refresh_token are required' }));
+          return;
+        }
+        // expires_at accepted as epoch ms or seconds; normalize to ms.
+        let expiresAt = typeof body.expires_at === 'number' ? body.expires_at : 0;
+        if (expiresAt > 0 && expiresAt < 1e12) expiresAt = Math.floor(expiresAt * 1000);
+        if (!expiresAt) expiresAt = Date.now() + 8 * 60 * 60 * 1000;  // 8h fallback
+        const scopes = Array.isArray(body.scopes) ? (body.scopes as unknown[]).map(String) : [];
+        const label = (typeof body.name === 'string' && body.name)
+          || (typeof body.email === 'string' && body.email)
+          || (typeof body.alias === 'string' && body.alias)
+          || '';
+        const proxy = typeof body.proxy_url === 'string' && body.proxy_url ? body.proxy_url : undefined;
+
+        const creds = await adminPersistAccount({
+          alias: label,
+          tokens: { accessToken, refreshToken, expiresAt, scopes },
+          proxy,
+        });
+        // Best-effort live wiring: if the pool is already active, the new
+        // account is routable immediately. When pool is null (0–1 accounts
+        // at startup) the file is persisted but pool mode only engages on the
+        // next restart once 2+ account files exist — surfaced via `pooled`.
+        if (pool) {
+          pool.add(creds.alias, {
+            accessToken: creds.accessToken,
+            refreshToken: creds.refreshToken,
+            expiresAt: creds.expiresAt,
+            deviceId: creds.deviceId,
+            accountUuid: creds.accountUuid,
+            proxy: creds.proxy,
+          });
+        }
+        res.writeHead(201, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ ok: true, alias: creds.alias, pooled: pool !== null }));
+      } catch (e) {
+        res.writeHead(500, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ error: 'add_account_failed', message: sanitizeError(e) }));
+      }
       return;
     }
 
