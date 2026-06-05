@@ -1451,6 +1451,50 @@ export async function startProxy(opts: ProxyOptions = {}): Promise<void> {
 
     if (urlPath === '/v1/models' && req.method === 'GET') { requestCount++; res.writeHead(200, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin }); res.end(MODELS_JSON); return; }
 
+    // Token counting. Claude Code and the Anthropic SDK call
+    // POST /v1/messages/count_tokens before sending; without it they get a
+    // 403 "Path not allowed" and surface a hard error. Forward it as a thin
+    // authenticated passthrough — same CC fingerprint headers + OAuth token a
+    // real request uses, but no body transform and no response remap (the
+    // reply is just {input_tokens}). The count omits dario's injected CC
+    // system prompt, so it's a slight underestimate — fine for client-side
+    // budgeting and enough to stop clients erroring.
+    if (urlPath === '/v1/messages/count_tokens') {
+      if (req.method !== 'POST') { res.writeHead(405, JSON_HEADERS); res.end(ERR_METHOD); return; }
+      requestCount++;
+      try {
+        let ctToken: string;
+        if (pool) {
+          const acc = pool.select();
+          if (!acc) { res.writeHead(503, JSON_HEADERS); res.end(JSON.stringify({ error: 'No accounts available in pool' })); return; }
+          ctToken = acc.accessToken;
+        } else {
+          ctToken = await getAccessToken();
+        }
+        const ctBody = await readJsonBody(req);
+        const ctRes = await fetch(`${ANTHROPIC_API}/v1/messages/count_tokens?beta=true`, {
+          method: 'POST',
+          headers: orderHeadersForOutbound({
+            ...staticHeaders,
+            'authorization': `Bearer ${ctToken}`,
+            'anthropic-version': '2023-06-01',
+            // Drop context-1m here: count_tokens never needs the 1m-context
+            // beta, and tiers without it reject the whole request with a 400
+            // (the /v1/messages path strips it via a retry; we skip it up front).
+            'anthropic-beta': betaWithoutContext1m,
+          }),
+          body: JSON.stringify(ctBody),
+        });
+        const ctText = await ctRes.text();
+        res.writeHead(ctRes.status, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(ctText);
+      } catch (e) {
+        res.writeHead(502, { ...JSON_HEADERS, 'Access-Control-Allow-Origin': corsOrigin });
+        res.end(JSON.stringify({ error: 'count_tokens_failed', message: sanitizeError(e) }));
+      }
+      return;
+    }
+
     // Detect OpenAI-format requests
     const isOpenAI = urlPath === '/v1/chat/completions';
 
