@@ -31,6 +31,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // The /admin/* machine API authenticates itself with DARIO_API_KEY
+  // (x-api-key / Bearer), not the browser cookie. Let it past the cookie
+  // gate so server-to-server callers aren't 307'd to /login.
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return NextResponse.next();
+  }
+
   const cookie = req.cookies.get(SESSION_COOKIE)?.value;
   const ok =
     cookie === (await expectedToken(process.env.AUTH_SECRET || "insecure-default-change-me"));
