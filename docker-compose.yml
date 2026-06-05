@@ -24,11 +24,11 @@ services:
       DARIO_API_KEY: ${DARIO_API_KEY:?set DARIO_API_KEY in .env}
     volumes:
       - dario-data:/home/dario/.dario
-    # No host port by default — the proxy is reachable only by the dashboard
-    # over the internal network. To route external tools (Cursor/Cline/...)
-    # through it, uncomment and send `x-api-key: $DARIO_API_KEY`:
-    # ports:
-    #   - "3456:3456"
+    # Proxy published for external tools (Cursor/Cline/Agent SDK/...). Clients
+    # must send DARIO_API_KEY as `x-api-key` or `Authorization: Bearer`. To
+    # close it again, comment this out and `docker compose up -d dario`.
+    ports:
+      - "3456:3456"
 
   dashboard:
     build:
